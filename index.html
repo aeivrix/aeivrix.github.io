@@ -25,6 +25,12 @@
   #slot { width: 100%; }
   canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
   #bg { z-index: 1; } #fx { z-index: 2; }
+  /* load-in: blossoms bloom in first, then the box and name rise in */
+  @keyframes bloom { from { opacity: 0; filter: blur(10px); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  #bg { animation: bloom 1.6s ease-out both; }
+  main, #fx { animation: rise 1s ease-out 1.3s both; }
+  @media (prefers-reduced-motion: reduce) { #bg, main, #fx { animation: none; } }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   p { margin-top: 1.5rem; max-width: 36ch; font-size: clamp(18px, 2vw, 24px); line-height: 1.2; color: #bbb; }
   a {

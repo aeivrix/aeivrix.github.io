@@ -23,7 +23,7 @@
   h1 { margin: 0; }
   #slot { width: 100%; }
   canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
-  #bg { z-index: -1; }
+  #bg { z-index: 1; } #fx { z-index: 2; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   p { margin-top: 1.5rem; max-width: 36ch; font-size: clamp(18px, 2vw, 24px); line-height: 1.2; color: #bbb; }
   a {
@@ -138,93 +138,120 @@ function frame(ms) {
 }
 requestAnimationFrame(frame);
 
-// gutter: soft x-ray flowers slowly turning and breathing, under flickering film grain.
-// drawn small and scaled up so the petals stay soft; only the margin shows them.
+// gutter: black & white blossom branches reaching in from the right edge, over the border.
+// generated from a fixed seed, they sway a touch and drop the odd petal. not interactive.
 {
-  const bg = document.getElementById("bg"), g = bg.getContext("2d"), main = document.querySelector("main");
-  const SCALE = 4, DIM = 0.6;
-  const low = document.createElement("canvas"), l = low.getContext("2d");
-  // a few grain frames, cycled every frame for flicker
-  const grain = Array.from({ length: 4 }, () => {
-    const c = document.createElement("canvas"); c.width = c.height = 192;
-    const x = c.getContext("2d"), im = x.createImageData(192, 192);
-    for (let i = 0; i < im.data.length; i += 4) { const v = 205 + rnd() * 50; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
-    x.putImageData(im, 0, 0);
-    return c;
-  });
-  // flowers sit around the edges so their petals spill through the margin
-  const flowers = [
-    { x: 0.04, y: 0.1, r: 0.42, n: 5, sp: 0.05, ph: 0 },
-    { x: 0.98, y: 0.2, r: 0.36, n: 6, sp: -0.04, ph: 1 },
-    { x: 0.9, y: 1.0, r: 0.48, n: 5, sp: 0.03, ph: 2 },
-    { x: 0.2, y: 0.98, r: 0.34, n: 6, sp: -0.06, ph: 3 },
-    { x: 0.55, y: -0.05, r: 0.3, n: 5, sp: 0.045, ph: 4 },
-  ];
-  let R, D;
+  const bg = document.getElementById("bg"), g = bg.getContext("2d");
+  let seed = 7;
+  const rand = () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const rr = (a, b) => a + rand() * (b - a), TAU = Math.PI * 2;
+
+  function petal(c, r) { // one petal pointing along +x, notched tip, shaded dark at the base
+    const w = r * 0.62, gr = c.createLinearGradient(0, 0, r, 0);
+    gr.addColorStop(0, "#7a7a7a"); gr.addColorStop(0.35, "#e4e4e4"); gr.addColorStop(1, "#fbfbfb");
+    c.fillStyle = gr;
+    c.beginPath(); c.moveTo(0, 0);
+    c.bezierCurveTo(r * 0.25, -w * 0.9, r * 0.85, -w, r * 0.97, -w * 0.25);
+    c.quadraticCurveTo(r * 0.88, 0, r * 0.97, w * 0.25);
+    c.bezierCurveTo(r * 0.85, w, r * 0.25, w * 0.9, 0, 0);
+    c.fill();
+    c.strokeStyle = "rgba(0,0,0,.13)"; c.lineWidth = Math.max(0.6, r * 0.02);
+    c.beginPath(); c.moveTo(r * 0.12, 0); c.lineTo(r * 0.78, 0); c.stroke();
+  }
+  function flower(c, x, y, r) {
+    c.save(); c.translate(x, y); c.rotate(rr(0, TAU)); c.scale(1, rr(0.55, 1)); // tilted towards/away from us
+    const off = rr(0, TAU);
+    for (let k = 0; k < 5; k++) { c.save(); c.rotate(off + k / 5 * TAU + rr(-0.15, 0.15)); petal(c, r * rr(0.85, 1.05)); c.restore(); }
+    const h = c.createRadialGradient(0, 0, 0, 0, 0, r * 0.38);
+    h.addColorStop(0, "#1a1a1a"); h.addColorStop(1, "rgba(30,30,30,0)");
+    c.fillStyle = h; c.beginPath(); c.arc(0, 0, r * 0.38, 0, TAU); c.fill();
+    c.lineWidth = Math.max(0.5, r * 0.025);
+    for (let k = 0; k < 12; k++) { // stamens
+      const a = rr(0, TAU), l = r * rr(0.22, 0.42), sx = Math.cos(a) * l, sy = Math.sin(a) * l;
+      c.strokeStyle = "#aaa"; c.beginPath(); c.moveTo(0, 0); c.lineTo(sx, sy); c.stroke();
+      c.fillStyle = "#fff"; c.beginPath(); c.arc(sx, sy, r * 0.04, 0, TAU); c.fill();
+    }
+    c.restore();
+  }
+  function bud(c, x, y, r, a) {
+    c.save(); c.translate(x, y); c.rotate(a);
+    const gr = c.createLinearGradient(-r, 0, r, 0); gr.addColorStop(0, "#555"); gr.addColorStop(1, "#eee");
+    c.fillStyle = gr; c.beginPath(); c.ellipse(0, 0, r, r * 0.6, 0, 0, TAU); c.fill(); c.restore();
+  }
+  function leaf(c, x, y, r, a) {
+    c.save(); c.translate(x, y); c.rotate(a);
+    const gr = c.createLinearGradient(0, 0, r, 0); gr.addColorStop(0, "#151515"); gr.addColorStop(1, "#4a4a4a");
+    c.fillStyle = gr; c.beginPath(); c.moveTo(0, 0);
+    c.quadraticCurveTo(r * 0.5, -r * 0.38, r, 0); c.quadraticCurveTo(r * 0.5, r * 0.38, 0, 0); c.fill(); c.restore();
+  }
+  function grow(c, x, y, a, len, w, depth, tips) {
+    const bend = rr(-0.35, 0.35);
+    const mx = x + Math.cos(a + bend * 0.5) * len * 0.5, my = y + Math.sin(a + bend * 0.5) * len * 0.5;
+    const ex = x + Math.cos(a + bend) * len, ey = y + Math.sin(a + bend) * len;
+    c.lineCap = "round";
+    c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(mx, my, ex, ey);
+    c.strokeStyle = "#333"; c.lineWidth = w; c.stroke();
+    c.strokeStyle = "rgba(255,255,255,.1)"; c.lineWidth = w * 0.3; c.stroke();
+    tips.push([ex, ey, a + bend, depth, mx, my]);
+    if (depth <= 0) return;
+    const kids = depth > 2 ? 2 : 1 + (rand() < 0.5);
+    for (let k = 0; k < kids; k++) grow(c, ex, ey, a + bend + rr(-0.75, 0.75), len * rr(0.6, 0.8), w * 0.66, depth - 1, tips);
+  }
+
+  let clusters = [], spots = [], r = 20;
   function layout() {
-    const dpr = devicePixelRatio || 1;
-    R = main.getBoundingClientRect();
-    bg.width = innerWidth * dpr; bg.height = innerHeight * dpr;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    low.width = Math.ceil(innerWidth / SCALE); low.height = Math.ceil(innerHeight / SCALE);
-    D = Math.min(low.width, low.height) * 1.4;
+    const dpr = devicePixelRatio || 1, W = innerWidth, H = innerHeight, m = Math.min(W, H);
+    bg.width = W * dpr; bg.height = H * dpr;
+    seed = 7; spots = [];
+    r = Math.max(10, Math.min(30, m * 0.04));
+    const reach = m * 0.3;
+    // anchor x, anchor y, direction, size, depth
+    clusters = [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4]].map(([ax, ay, a, len, d], i) => {
+      const cv = document.createElement("canvas"); cv.width = W * dpr; cv.height = H * dpr;
+      const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const tips = [];
+      grow(c, ax, ay, a, len * 0.55, Math.max(3, r * 0.3), d, tips);
+      for (const [x, y, ang, depth, mx, my] of tips) {
+        if (rand() < 0.5) leaf(c, mx, my, r * rr(0.9, 1.4), ang + rr(-1.3, 1.3));
+        if (depth <= 2) {
+          const n = 1 + (rand() < 0.45);
+          for (let k = 0; k < n; k++) {
+            const fx = x + rr(-1.6, 1.6) * r, fy = y + rr(-1.6, 1.6) * r;
+            flower(c, fx, fy, r * rr(0.75, 1.1)); spots.push([fx, fy]);
+          }
+          if (rand() < 0.6) bud(c, x + Math.cos(ang) * r * 1.3, y + Math.sin(ang) * r * 1.3, r * 0.3, ang);
+        }
+      }
+      return { cv, ax, ay, ph: i * 2.1 };
+    });
   }
   addEventListener("resize", layout);
   layout();
-  function petal(len, wid) {
-    const gr = l.createRadialGradient(0, 0, 0, 0, 0, len);
-    gr.addColorStop(0, "rgba(255,255,255,.4)");
-    gr.addColorStop(0.6, "rgba(235,235,235,.14)");
-    gr.addColorStop(1, "rgba(255,255,255,0)");
-    l.fillStyle = gr;
-    l.beginPath();
-    l.moveTo(0, 0);
-    l.bezierCurveTo(len * 0.35, -wid, len * 0.95, -wid * 0.9, len, 0);
-    l.bezierCurveTo(len * 0.95, wid * 0.9, len * 0.35, wid, 0, 0);
-    l.fill();
+
+  const falling = Array.from({ length: 6 }, () => ({ wait: rr(0, 12) }));
+  function drop(p) {
+    const [x, y] = spots[rand() * spots.length | 0];
+    Object.assign(p, { x, y, vy: rr(10, 22), ph: rr(0, TAU), rot: rr(0, TAU), vr: rr(-0.8, 0.8), s: r * rr(0.35, 0.5), wait: 0 });
   }
+  let prev = 0;
   function draw(ms) {
-    const t = still ? 0 : ms / 1000;
-    l.setTransform(1, 0, 0, 1, 0, 0);
-    l.globalCompositeOperation = "source-over";
-    l.fillStyle = "#000"; l.fillRect(0, 0, low.width, low.height);
-    l.globalCompositeOperation = "lighter"; // overlapping petals glow like an x-ray
-    for (const f of flowers) {
-      const breathe = 1 + 0.06 * Math.sin(t * 0.4 + f.ph);
-      const len = f.r * D * breathe * 0.75; // smaller flowers leave dark gaps between them
-      l.setTransform(1, 0, 0, 1,
-        f.x * low.width + Math.sin(t * 0.07 + f.ph) * 6,
-        f.y * low.height + Math.cos(t * 0.06 + f.ph) * 6);
-      l.rotate(t * f.sp + f.ph);
-      for (let k = 0; k < f.n; k++) {
-        l.save();
-        l.rotate(k / f.n * 6.283 + 0.15 * Math.sin(t * 0.3 + k + f.ph));
-        petal(len * (0.85 + 0.15 * Math.sin(k * 2.1 + f.ph)), len * 0.42);
-        l.restore();
-      }
-      // bright heart
-      const h = l.createRadialGradient(0, 0, 0, 0, 0, len * 0.3);
-      h.addColorStop(0, "rgba(255,255,255,.5)"); h.addColorStop(1, "rgba(255,255,255,0)");
-      l.fillStyle = h; l.beginPath(); l.arc(0, 0, len * 0.3, 0, 6.283); l.fill();
+    const t = still ? 0 : ms / 1000, dt = Math.min(0.05, (ms - prev) / 1000), dpr = devicePixelRatio || 1; prev = ms;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, bg.width, bg.height);
+    for (const cl of clusters) { // gentle sway around where each branch enters the screen
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.translate(cl.ax, cl.ay); g.rotate(0.012 * Math.sin(t * 0.5 + cl.ph)); g.translate(-cl.ax, -cl.ay);
+      g.drawImage(cl.cv, 0, 0, innerWidth, innerHeight);
     }
-    g.clearRect(0, 0, innerWidth, innerHeight);
-    g.save();
-    g.beginPath(); g.rect(0, 0, innerWidth, innerHeight); g.rect(R.left, R.top, R.width, R.height);
-    g.clip("evenodd");
-    g.fillStyle = "#000"; g.fillRect(0, 0, innerWidth, innerHeight); // opaque base so the grain multiply has something to darken
-    g.globalAlpha = DIM;
-    g.filter = "blur(3px)"; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
-    g.drawImage(low, 0, 0, innerWidth, innerHeight);
-    g.filter = "none"; g.globalAlpha = 1;
-    // film grain: speckle the bright parts, plus a faint haze of grain on the black
-    const n = grain[(t * 24 | 0) % grain.length], ox = rnd() * 192, oy = rnd() * 192;
-    g.translate(-ox, -oy);
-    g.fillStyle = g.createPattern(n, "repeat");
-    g.globalCompositeOperation = "multiply";
-    g.fillRect(0, 0, innerWidth + 192, innerHeight + 192);
-    g.globalCompositeOperation = "source-over"; g.globalAlpha = 0.015;
-    g.fillRect(0, 0, innerWidth + 192, innerHeight + 192);
-    g.restore();
+    if (!still) for (const p of falling) {
+      if (p.wait > 0) { p.wait -= dt; if (p.wait <= 0) drop(p); continue; }
+      p.y += p.vy * dt; p.rot += p.vr * dt;
+      const x = p.x + Math.sin(t * 0.8 + p.ph) * 18;
+      if (p.y > innerHeight + 20) { p.wait = rr(2, 10); continue; }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.translate(x, p.y); g.rotate(p.rot); g.scale(1, 0.6 + 0.4 * Math.sin(t * 1.5 + p.ph)); // flutter
+      g.globalAlpha = 0.85; petal(g, p.s); g.globalAlpha = 1;
+    }
     if (!still) requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);

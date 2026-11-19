@@ -138,66 +138,47 @@ function frame(ms) {
 }
 requestAnimationFrame(frame);
 
-// gutter: the margin is a loop of build/ship commands running around the frame
-// in lanes, alternating direction; bright "packets" race along each lane like builds shipping out.
+// gutter: warp starfield. stars stream out from behind the box; only the margin shows them,
+// so the box reads as a window flying through space.
 {
   const bg = document.getElementById("bg"), g = bg.getContext("2d"), main = document.querySelector("main");
-  const SIZE = 11, LANE = 14, ADV = 7.5;
-  const TEXT = [
-    "cargo build --release  ·  cargo test  ·  cargo clippy  ·  ",
-    "python -m pytest  ·  uv sync  ·  ruff check .  ·  ",
-    "tsc --noEmit  ·  pnpm build  ·  vitest run  ·  ",
-    "gcc -O2 -Wall  ·  make  ·  git push  ·  ship it  ·  ",
-  ];
-  let lanes = [];
+  const N = 700, SPEED = 0.9; // star count, warp speed (depth units per second)
+  let R, cx, cy, f;
+  const stars = Array.from({ length: N }, () => spawn({}, true));
+  function spawn(p, anyDepth) {
+    p.x = (rnd() * 2 - 1); p.y = (rnd() * 2 - 1); p.z = anyDepth ? rnd() * 1.0 + 0.05 : 1.05;
+    p.pz = p.z;
+    return p;
+  }
   function layout() {
-    const dpr = devicePixelRatio || 1, r = main.getBoundingClientRect();
+    const dpr = devicePixelRatio || 1;
+    R = main.getBoundingClientRect();
     bg.width = innerWidth * dpr; bg.height = innerHeight * dpr;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const gutter = Math.min(r.left, r.top), count = Math.max(1, Math.min(4, Math.floor((gutter - 6) / LANE)));
-    // spread lanes evenly across the gutter
-    const pad = (gutter - count * LANE) / 2;
-    lanes = [];
-    for (let k = 0; k < count; k++) {
-      const o = pad + k * LANE + LANE / 2, w = innerWidth - 2 * o, h = innerHeight - 2 * o;
-      const P = 2 * (w + h), n = Math.floor(P / ADV), src = TEXT[k % TEXT.length];
-      let str = ""; while (str.length < n) str += src;
-      lanes.push({ o, w, h, P, n, step: P / n, str: str.slice(0, n), dir: k % 2 ? -1 : 1, speed: 18 + k * 7 });
-    }
-  }
-  // walk the rectangle clockwise from the top-left corner
-  function at(L, s) {
-    const { o, w, h } = L;
-    if (s < w) return [o + s, o, 0];
-    if ((s -= w) < h) return [o + w, o + s, Math.PI / 2];
-    if ((s -= h) < w) return [o + w - s, o + h, Math.PI];
-    return [o, o + h - (s - w), -Math.PI / 2];
+    cx = innerWidth / 2; cy = innerHeight / 2; f = Math.max(innerWidth, innerHeight) * 0.5;
   }
   addEventListener("resize", layout);
   layout();
+  let prev = 0;
   function draw(ms) {
-    const t = still ? 0 : ms / 1000, dpr = devicePixelRatio || 1;
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const dt = Math.min(0.05, (ms - prev) / 1000); prev = ms;
     g.clearRect(0, 0, innerWidth, innerHeight);
-    g.font = `${SIZE}px ui-monospace, Menlo, monospace`; g.textAlign = "center"; g.textBaseline = "middle";
-    for (const L of lanes) {
-      const shift = ((t * L.speed * L.dir) % L.P + L.P) % L.P;
-      const packets = [0, 1, 2].map(p => ((t * L.speed * 6 * L.dir + p * L.P / 3) % L.P + L.P) % L.P);
-      for (let j = 0; j < L.n; j++) {
-        const c = L.str[j];
-        if (c === " ") continue;
-        const s = (j * L.step + shift) % L.P;
-        let glow = 0;
-        for (const p of packets) {
-          let d = (p - s) * L.dir; d = ((d % L.P) + L.P) % L.P; // distance behind the packet head
-          if (d < 160) glow = Math.max(glow, 1 - d / 160);
-        }
-        const [x, y, rot] = at(L, s);
-        g.setTransform(dpr * Math.cos(rot), dpr * Math.sin(rot), -dpr * Math.sin(rot), dpr * Math.cos(rot), x * dpr, y * dpr);
-        g.fillStyle = `rgba(255,255,255,${0.16 + glow * glow * 0.8})`;
-        g.fillText(c, 0, 0);
-      }
+    g.save();
+    g.beginPath(); g.rect(0, 0, innerWidth, innerHeight); g.rect(R.left, R.top, R.width, R.height);
+    g.clip("evenodd"); // stars only show in the margin
+    g.lineCap = "square";
+    for (const p of stars) {
+      p.pz = p.z; p.z -= SPEED * dt;
+      if (p.z <= 0.02) { spawn(p); continue; }
+      const sx = cx + p.x / p.z * f, sy = cy + p.y / p.z * f;
+      const px = cx + p.x / p.pz * f, py = cy + p.y / p.pz * f;
+      if (sx < -50 || sx > innerWidth + 50 || sy < -50 || sy > innerHeight + 50) { spawn(p); continue; }
+      const near = 1 - p.z; // 0 far .. 1 close
+      g.strokeStyle = `rgba(255,255,255,${0.15 + near * near * 0.85})`;
+      g.lineWidth = 1 + near * 2;
+      g.beginPath(); g.moveTo(px, py); g.lineTo(sx, sy); g.stroke();
     }
+    g.restore();
     if (!still) requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);

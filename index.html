@@ -161,7 +161,6 @@ document.getElementById("seed").textContent = SEED_HEX;
       case 14: { const gr = c.createLinearGradient(b[i], b[i + 1], b[i + 2], b[i + 3]); i += 4; fillGrad(gr); break; }
       case 15: { const gr = c.createRadialGradient(b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5]); i += 6; fillGrad(gr); break; }
       case 16: c.globalAlpha = b[i++]; break;
-      case 17: c.filter = b[i] ? `blur(${b[i]}px)` : "none"; i++; break;
       case 18: c.lineCap = "round"; break;
     }
   }

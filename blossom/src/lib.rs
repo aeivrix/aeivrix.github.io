@@ -20,7 +20,6 @@ const STROKE: f32 = 13.0; // grey, alpha, width
 const LINEAR_FILL: f32 = 14.0; // x0 y0 x1 y1, n, (offset grey alpha) * n
 const RADIAL_FILL: f32 = 15.0; // x0 y0 r0 x1 y1 r1, n, (offset grey alpha) * n
 const ALPHA: f32 = 16.0;
-const BLUR: f32 = 17.0;
 const ROUND_CAPS: f32 = 18.0;
 
 struct Pen {
@@ -119,16 +118,14 @@ impl Pen {
         self.op(&[BEGIN, MOVE, 0.0, 0.0, LINE, r * 0.9, 0.0, STROKE, 255.0, 0.12, 0.8, RESTORE]);
     }
 
-    /// a blossom on a stalk; some sit out of focus / in shadow so the cluster has depth
+    /// a blossom on a stalk; some sit in shadow (dimmer) so the cluster has depth
     fn bloom(&mut self, x: f32, y: f32, rad: f32, bx: f32, by: f32) {
         let (cx, cy) = ((bx + x) / 2.0 + self.rr(-4.0, 4.0), (by + y) / 2.0 + self.rr(-4.0, 4.0));
         self.op(&[BEGIN, MOVE, bx, by, QUAD, cx, cy, x, y, STROKE, 42.0, 1.0, (rad * 0.06).max(1.0)]);
         let depth = self.rand();
         let alpha = if depth < 0.25 { 0.45 } else if depth < 0.5 { 0.75 } else { 1.0 };
+        // no canvas blur: chromium blurs every shape separately, which is very slow
         self.op(&[SAVE, ALPHA, alpha]);
-        if depth < 0.25 {
-            self.op(&[BLUR, 2.0]);
-        }
         let open = self.rand() > 0.15;
         self.flower(x, y, rad, open);
         self.op(&[RESTORE]);
@@ -243,7 +240,7 @@ mod tests {
             i += 1;
             i += match op {
                 0 | 1 | 5 | 18 => 0,
-                3 | 16 | 17 => 1,
+                3 | 16 => 1,
                 2 | 4 | 6 | 7 | 12 => 2,
                 10 | 13 => 3,
                 8 | 11 => 4,

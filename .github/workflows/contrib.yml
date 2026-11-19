@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  pages: write
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -21,3 +22,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "update contributions" && git push
+      # pushes made with the workflow token don't kick off a pages build on their own
+      - name: rebuild pages
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" --jq .status

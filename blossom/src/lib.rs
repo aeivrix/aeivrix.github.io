@@ -1,7 +1,4 @@
-//! Grows black & white blossom branches and records them as a flat list of
-//! canvas draw commands (f32s). The page replays the list onto a <canvas>.
-//! No dependencies: build with `cargo build --release --target wasm32-unknown-unknown`.
-#![allow(static_mut_refs)] // single-threaded wasm, one caller
+#![allow(static_mut_refs)] // single-threaded wasm
 
 use std::f32::consts::TAU;
 

@@ -13,7 +13,7 @@
   * { box-sizing: border-box; margin: 0; }
   html { height: 100%; background: #000; color: #fff; }
   body { height: 100%; }
-  body { padding: clamp(24px, 5vw, 60px); font-family: "VT323", monospace; }
+  body { padding: clamp(28px, 7vw, 100px); font-family: "VT323", monospace; }
   main {
     height: 100%;
     border: 2px solid #fff;
@@ -138,46 +138,92 @@ function frame(ms) {
 }
 requestAnimationFrame(frame);
 
-// gutter: warp starfield. stars stream out from behind the box; only the margin shows them,
-// so the box reads as a window flying through space.
+// gutter: soft x-ray flowers slowly turning and breathing, under flickering film grain.
+// drawn small and scaled up so the petals stay soft; only the margin shows them.
 {
   const bg = document.getElementById("bg"), g = bg.getContext("2d"), main = document.querySelector("main");
-  const N = 700, SPEED = 0.9; // star count, warp speed (depth units per second)
-  let R, cx, cy, f;
-  const stars = Array.from({ length: N }, () => spawn({}, true));
-  function spawn(p, anyDepth) {
-    p.x = (rnd() * 2 - 1); p.y = (rnd() * 2 - 1); p.z = anyDepth ? rnd() * 1.0 + 0.05 : 1.05;
-    p.pz = p.z;
-    return p;
-  }
+  const SCALE = 4, DIM = 0.6;
+  const low = document.createElement("canvas"), l = low.getContext("2d");
+  // a few grain frames, cycled every frame for flicker
+  const grain = Array.from({ length: 4 }, () => {
+    const c = document.createElement("canvas"); c.width = c.height = 192;
+    const x = c.getContext("2d"), im = x.createImageData(192, 192);
+    for (let i = 0; i < im.data.length; i += 4) { const v = 205 + rnd() * 50; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 255; }
+    x.putImageData(im, 0, 0);
+    return c;
+  });
+  // flowers sit around the edges so their petals spill through the margin
+  const flowers = [
+    { x: 0.04, y: 0.1, r: 0.42, n: 5, sp: 0.05, ph: 0 },
+    { x: 0.98, y: 0.2, r: 0.36, n: 6, sp: -0.04, ph: 1 },
+    { x: 0.9, y: 1.0, r: 0.48, n: 5, sp: 0.03, ph: 2 },
+    { x: 0.2, y: 0.98, r: 0.34, n: 6, sp: -0.06, ph: 3 },
+    { x: 0.55, y: -0.05, r: 0.3, n: 5, sp: 0.045, ph: 4 },
+  ];
+  let R, D;
   function layout() {
     const dpr = devicePixelRatio || 1;
     R = main.getBoundingClientRect();
     bg.width = innerWidth * dpr; bg.height = innerHeight * dpr;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    cx = innerWidth / 2; cy = innerHeight / 2; f = Math.max(innerWidth, innerHeight) * 0.5;
+    low.width = Math.ceil(innerWidth / SCALE); low.height = Math.ceil(innerHeight / SCALE);
+    D = Math.min(low.width, low.height) * 1.4;
   }
   addEventListener("resize", layout);
   layout();
-  let prev = 0;
+  function petal(len, wid) {
+    const gr = l.createRadialGradient(0, 0, 0, 0, 0, len);
+    gr.addColorStop(0, "rgba(255,255,255,.4)");
+    gr.addColorStop(0.6, "rgba(235,235,235,.14)");
+    gr.addColorStop(1, "rgba(255,255,255,0)");
+    l.fillStyle = gr;
+    l.beginPath();
+    l.moveTo(0, 0);
+    l.bezierCurveTo(len * 0.35, -wid, len * 0.95, -wid * 0.9, len, 0);
+    l.bezierCurveTo(len * 0.95, wid * 0.9, len * 0.35, wid, 0, 0);
+    l.fill();
+  }
   function draw(ms) {
-    const dt = Math.min(0.05, (ms - prev) / 1000); prev = ms;
+    const t = still ? 0 : ms / 1000;
+    l.setTransform(1, 0, 0, 1, 0, 0);
+    l.globalCompositeOperation = "source-over";
+    l.fillStyle = "#000"; l.fillRect(0, 0, low.width, low.height);
+    l.globalCompositeOperation = "lighter"; // overlapping petals glow like an x-ray
+    for (const f of flowers) {
+      const breathe = 1 + 0.06 * Math.sin(t * 0.4 + f.ph);
+      const len = f.r * D * breathe * 0.75; // smaller flowers leave dark gaps between them
+      l.setTransform(1, 0, 0, 1,
+        f.x * low.width + Math.sin(t * 0.07 + f.ph) * 6,
+        f.y * low.height + Math.cos(t * 0.06 + f.ph) * 6);
+      l.rotate(t * f.sp + f.ph);
+      for (let k = 0; k < f.n; k++) {
+        l.save();
+        l.rotate(k / f.n * 6.283 + 0.15 * Math.sin(t * 0.3 + k + f.ph));
+        petal(len * (0.85 + 0.15 * Math.sin(k * 2.1 + f.ph)), len * 0.42);
+        l.restore();
+      }
+      // bright heart
+      const h = l.createRadialGradient(0, 0, 0, 0, 0, len * 0.3);
+      h.addColorStop(0, "rgba(255,255,255,.5)"); h.addColorStop(1, "rgba(255,255,255,0)");
+      l.fillStyle = h; l.beginPath(); l.arc(0, 0, len * 0.3, 0, 6.283); l.fill();
+    }
     g.clearRect(0, 0, innerWidth, innerHeight);
     g.save();
     g.beginPath(); g.rect(0, 0, innerWidth, innerHeight); g.rect(R.left, R.top, R.width, R.height);
-    g.clip("evenodd"); // stars only show in the margin
-    g.lineCap = "square";
-    for (const p of stars) {
-      p.pz = p.z; p.z -= SPEED * dt;
-      if (p.z <= 0.02) { spawn(p); continue; }
-      const sx = cx + p.x / p.z * f, sy = cy + p.y / p.z * f;
-      const px = cx + p.x / p.pz * f, py = cy + p.y / p.pz * f;
-      if (sx < -50 || sx > innerWidth + 50 || sy < -50 || sy > innerHeight + 50) { spawn(p); continue; }
-      const near = 1 - p.z; // 0 far .. 1 close
-      g.strokeStyle = `rgba(255,255,255,${0.15 + near * near * 0.85})`;
-      g.lineWidth = 1 + near * 2;
-      g.beginPath(); g.moveTo(px, py); g.lineTo(sx, sy); g.stroke();
-    }
+    g.clip("evenodd");
+    g.fillStyle = "#000"; g.fillRect(0, 0, innerWidth, innerHeight); // opaque base so the grain multiply has something to darken
+    g.globalAlpha = DIM;
+    g.filter = "blur(3px)"; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+    g.drawImage(low, 0, 0, innerWidth, innerHeight);
+    g.filter = "none"; g.globalAlpha = 1;
+    // film grain: speckle the bright parts, plus a faint haze of grain on the black
+    const n = grain[(t * 24 | 0) % grain.length], ox = rnd() * 192, oy = rnd() * 192;
+    g.translate(-ox, -oy);
+    g.fillStyle = g.createPattern(n, "repeat");
+    g.globalCompositeOperation = "multiply";
+    g.fillRect(0, 0, innerWidth + 192, innerHeight + 192);
+    g.globalCompositeOperation = "source-over"; g.globalAlpha = 0.015;
+    g.fillRect(0, 0, innerWidth + 192, innerHeight + 192);
     g.restore();
     if (!still) requestAnimationFrame(draw);
   }

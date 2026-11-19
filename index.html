@@ -22,13 +22,13 @@
   h1 { margin: 0; }
   #slot { width: 100%; }
   #name { display: block; }
-  #bg { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 1; }
+  #bg, #petals { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 1; }
   /* load-in: blossoms bloom in first, then the box rises in */
-  @keyframes bloom { from { opacity: 0; filter: blur(10px); } }
+  @keyframes bloom { from { opacity: 0; } }
   @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
-  #bg { animation: bloom 1.6s ease-out both; }
+  #bg, #petals { animation: bloom 1.6s ease-out both; }
   main, .meta { animation: rise 1s ease-out 1.3s both; }
-  @media (prefers-reduced-motion: reduce) { #bg, main, .meta { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { #bg, #petals, main, .meta { animation: none; } }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
   .cols { display: grid; grid-template-columns: minmax(0, 25rem) minmax(0, 340px); gap: clamp(24px, 6vw, 96px); margin-top: 1.5rem; align-items: start; }
@@ -93,6 +93,7 @@
 </main>
 <footer class="meta">flowers grown in rust/wasm · seed <span id="seed"></span> · <a href="https://github.com/aeivrix/aeivrix.github.io/blob/main/blossom/src/lib.rs">source</a> · <a href="#" id="shell">~ shell</a></footer>
 <canvas id="bg" aria-hidden="true"></canvas>
+<canvas id="petals" aria-hidden="true"></canvas>
 <script>
 const rnd = Math.random, TAU = Math.PI * 2;
 const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -128,7 +129,6 @@ function size() {
   nctx.font = `bold ${cell * 1.25}px ui-monospace, Menlo, monospace`; nctx.textBaseline = "top"; nctx.fillStyle = "#fff";
   for (const p of P) nctx.fillText(p.ch, p.gx * cell, p.gy * cell);
 }
-addEventListener("resize", size);
 size();
 
 // ---- blossoms: geometry comes from blossom.wasm (rust, see blossom/src/lib.rs); a new seed every visit
@@ -137,7 +137,7 @@ const SEED_HEX = "0x" + SEED.toString(16).padStart(8, "0");
 document.getElementById("seed").textContent = SEED_HEX;
 {
   const bg = document.getElementById("bg"), g = bg.getContext("2d");
-  let wasm, clusters = [], spots = [], sprite, sw = 0, sh = 0;
+  let wasm, spots = [], sprite, sw = 0, sh = 0;
   // replay the rust command stream; opcodes/arities must match blossom/src/lib.rs
   function replay(c, b) {
     const S = (k, a) => `rgba(${k},${k},${k},${a})`;
@@ -166,28 +166,30 @@ document.getElementById("seed").textContent = SEED_HEX;
     }
   }
   const commands = n => new Float32Array(wasm.memory.buffer, wasm.commands(), n); // fresh view: memory may have grown
+  const pc = document.getElementById("petals"), pg = pc.getContext("2d");
+  let dpr = 1;
+  // branches are drawn once per layout straight into #bg; nothing redraws them per frame
   function layout() {
-    const dpr = devicePixelRatio || 1, W = innerWidth, H = innerHeight, m = Math.min(W, H);
-    bg.width = W * dpr; bg.height = H * dpr;
+    dpr = Math.min(2, devicePixelRatio || 1);
+    const W = innerWidth, H = innerHeight, m = Math.min(W, H);
+    bg.width = pc.width = W * dpr; bg.height = pc.height = H * dpr;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const k = W < 700 ? 0.7 : 1; // smaller trees on phones so they stay off the text
     const r = Math.max(8, Math.min(30, m * 0.04)) * k, reach = m * 0.3 * k;
     wasm.reset(SEED);
     // anchor x, anchor y, heading, reach, depth
-    clusters = [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4],
-      [-8, H * 0.98, -Math.PI / 2 + 0.3, reach * 0.6, 3], [-8, -8, Math.PI / 2 - 0.35, reach * 0.45, 3]].map(([ax, ay, a, len, d], k) => {
-      const cv = document.createElement("canvas"); cv.width = W * dpr; cv.height = H * dpr;
-      const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
-      replay(c, commands(wasm.cluster(ax, ay, a, len, d, r)));
-      return { cv, ax, ay, ph: k * 2.1 };
-    });
+    for (const [ax, ay, a, len, d] of [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4],
+      [-8, H * 0.98, -Math.PI / 2 + 0.3, reach * 0.6, 3], [-8, -8, Math.PI / 2 - 0.35, reach * 0.45, 3]]) {
+      g.save(); replay(g, commands(wasm.cluster(ax, ay, a, len, d, r))); g.restore();
+    }
     spots = Array.from(new Float32Array(wasm.memory.buffer, wasm.spots(), wasm.spot_count() * 2));
     // one loose petal, drawn once, reused for every falling petal
     const s = r * 0.5; sw = s * 1.1 + 4; sh = s * 1.6;
-    sprite = document.createElement("canvas"); sprite.width = sw * dpr; sprite.height = sh * dpr;
+    sprite = sprite || document.createElement("canvas");
+    sprite.width = Math.ceil(sw * dpr); sprite.height = Math.ceil(sh * dpr);
     const c = sprite.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.translate(2, sh / 2);
     replay(c, commands(wasm.petal(s)));
   }
-  addEventListener("resize", () => wasm && layout());
 
   const falling = Array.from({ length: 6 }, () => ({ wait: rnd() * 12 }));
   function drop(p) {
@@ -195,28 +197,26 @@ document.getElementById("seed").textContent = SEED_HEX;
     Object.assign(p, { x: spots[k], y: spots[k + 1], vy: 10 + rnd() * 12, ph: rnd() * TAU, rot: rnd() * TAU, vr: rnd() * 1.6 - 0.8, k: 0.7 + rnd() * 0.3, wait: 0 });
   }
   let prev = 0;
-  function draw(ms) {
-    const t = still ? 0 : ms / 1000, dt = Math.min(0.05, (ms - prev) / 1000), dpr = devicePixelRatio || 1; prev = ms;
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, bg.width, bg.height);
-    for (const cl of clusters) { // gentle sway around where each branch enters the screen
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
-      g.translate(cl.ax, cl.ay); g.rotate(0.012 * Math.sin(t * 0.5 + cl.ph)); g.translate(-cl.ax, -cl.ay);
-      g.drawImage(cl.cv, 0, 0, innerWidth, innerHeight);
-    }
-    if (!still && spots.length) for (const p of falling) {
-      if (p.wait > 0) { p.wait -= dt; if (p.wait <= 0) drop(p); continue; }
+  function draw(ms) { // only the falling petals animate: a clear plus six small sprites per frame
+    const t = ms / 1000, dt = Math.min(0.05, (ms - prev) / 1000); prev = ms;
+    pg.setTransform(1, 0, 0, 1, 0, 0);
+    pg.clearRect(0, 0, pc.width, pc.height);
+    for (const p of falling) {
+      if (p.wait > 0) { p.wait -= dt; if (p.wait <= 0 && spots.length) drop(p); continue; }
       p.y += p.vy * dt; p.rot += p.vr * dt;
       if (p.y > innerHeight + 20) { p.wait = 2 + rnd() * 8; continue; }
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
-      g.translate(p.x + Math.sin(t * 0.8 + p.ph) * 18, p.y); g.rotate(p.rot);
-      g.scale(p.k, p.k * (0.6 + 0.4 * Math.sin(t * 1.5 + p.ph))); // flutter
-      g.globalAlpha = 0.85; g.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); g.globalAlpha = 1;
+      pg.setTransform(dpr, 0, 0, dpr, 0, 0);
+      pg.translate(p.x + Math.sin(t * 0.8 + p.ph) * 18, p.y); pg.rotate(p.rot);
+      pg.scale(p.k, p.k * (0.6 + 0.4 * Math.sin(t * 1.5 + p.ph))); // flutter
+      pg.globalAlpha = 0.85; pg.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); pg.globalAlpha = 1;
     }
-    if (!still) requestAnimationFrame(draw);
+    requestAnimationFrame(draw);
   }
+  // one relayout after resizing settles, instead of one per resize event
+  let pending;
+  addEventListener("resize", () => { clearTimeout(pending); pending = setTimeout(() => { size(); if (wasm) layout(); }, 150); });
   WebAssembly.instantiateStreaming(fetch("blossom.wasm")).then(({ instance }) => {
-    wasm = instance.exports; layout(); requestAnimationFrame(draw);
+    wasm = instance.exports; layout(); if (!still) requestAnimationFrame(draw);
   }).catch(() => {}); // no wasm, no flowers; the page still works
 }
 

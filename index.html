@@ -65,7 +65,7 @@ const G = {
   r: [".....", ".....", "#.##.", "##..#", "#....", "#....", "#...."],
   x: [".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#"],
 };
-const SUB = 5, SOLID = "#@%&$8B", DUST = "*+=:-~.'`", rnd = Math.random;
+const SUB = 5, SOLID = "#@%&$8B", rnd = Math.random;
 const P = [];
 let cols = 0;
 for (const ch of "aeivrix") {
@@ -94,49 +94,19 @@ function size() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.font = `bold ${cell * 1.25}px ui-monospace, Menlo, monospace`;
   ctx.textBaseline = "top";
-  // the name never moves, so draw it once offscreen and blit it each frame
+  // the name never moves: draw it offscreen, then onto the page
   layer.width = cv.width; layer.height = cv.height;
   const n = layer.getContext("2d");
   n.setTransform(dpr, 0, 0, dpr, 0, 0);
   n.font = ctx.font; n.textBaseline = "top"; n.fillStyle = "#fff";
   for (const p of P) n.fillText(p.ch, ox + p.gx * cell, oy + p.gy * cell);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height); ctx.drawImage(layer, 0, 0);
 }
 addEventListener("resize", size);
 size();
 document.fonts.ready.then(size); // text font shifts layout once it loads
 
-// name stays put; dust keeps shedding off random spots of it and drifting away
-const RATE = 12, LIFE = 4.5; // particles per frame, seconds each one lives
 const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const dust = [];
-let last = 0;
-
-function frame(ms) {
-  const dt = Math.min(0.05, (ms - last) / 1000); last = ms;
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(layer, 0, 0);
-  ctx.setTransform(devicePixelRatio || 1, 0, 0, devicePixelRatio || 1, 0, 0);
-  if (still) return;
-  for (let n = 0; n < RATE; n++) {
-    const p = P[rnd() * P.length | 0];
-    dust.push({ hx: ox + p.gx * cell, hy: oy + p.gy * cell, ch: p.ch, age: 0,
-      ax: 0.3 + rnd(), ay: 0.2 + rnd() * 0.9, wob: rnd() * 6.28 });
-  }
-  const reach = W * 0.45;
-  for (let i = dust.length - 1; i >= 0; i--) {
-    const d = dust[i];
-    d.age += dt / LIFE;
-    if (d.age >= 1) { dust[i] = dust[dust.length - 1]; dust.pop(); continue; }
-    const u = d.age * d.age;
-    const x = d.hx + u * d.ax * reach + Math.sin(u * 9 + d.wob) * u * cell * 6;
-    const y = d.hy - u * d.ay * reach * 0.6 + Math.cos(u * 7 + d.wob) * u * cell * 4;
-    ctx.fillStyle = `rgba(255,255,255,${1 - d.age})`;
-    ctx.fillText(u < 0.01 ? d.ch : DUST[Math.min(DUST.length - 1, d.age * DUST.length | 0)], x, y);
-  }
-  requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
 
 // gutter: black & white blossom branches reaching in from the right edge, over the border.
 // generated from a fixed seed, they sway a touch and drop the odd petal. not interactive.
@@ -146,56 +116,90 @@ requestAnimationFrame(frame);
   const rand = () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   const rr = (a, b) => a + rand() * (b - a), TAU = Math.PI * 2;
 
-  function petal(c, r) { // one petal pointing along +x, notched tip, shaded dark at the base
-    const w = r * 0.62, gr = c.createLinearGradient(0, 0, r, 0);
-    gr.addColorStop(0, "#7a7a7a"); gr.addColorStop(0.35, "#e4e4e4"); gr.addColorStop(1, "#fbfbfb");
-    c.fillStyle = gr;
+  function petal(c, r) { // one petal along +x: wavy rim, notched tip, dark base, cupped edges, veins
+    const w = r * rr(0.55, 0.68), j = () => rr(-0.04, 0.04) * r;
     c.beginPath(); c.moveTo(0, 0);
-    c.bezierCurveTo(r * 0.25, -w * 0.9, r * 0.85, -w, r * 0.97, -w * 0.25);
-    c.quadraticCurveTo(r * 0.88, 0, r * 0.97, w * 0.25);
-    c.bezierCurveTo(r * 0.85, w, r * 0.25, w * 0.9, 0, 0);
-    c.fill();
-    c.strokeStyle = "rgba(0,0,0,.13)"; c.lineWidth = Math.max(0.6, r * 0.02);
-    c.beginPath(); c.moveTo(r * 0.12, 0); c.lineTo(r * 0.78, 0); c.stroke();
+    c.bezierCurveTo(r * 0.2, -w * 0.7 + j(), r * 0.55, -w * 1.05 + j(), r * 0.85, -w * 0.7 + j());
+    c.quadraticCurveTo(r * 1.0, -w * 0.4, r * 0.97, -w * 0.12);
+    c.quadraticCurveTo(r * 0.9, rr(-0.04, 0.04) * w, r * 0.97, w * 0.12);
+    c.quadraticCurveTo(r * 1.0, w * 0.4, r * 0.85, w * 0.7 + j());
+    c.bezierCurveTo(r * 0.55, w * 1.05 + j(), r * 0.2, w * 0.7 + j(), 0, 0);
+    const along = c.createLinearGradient(0, 0, r, 0);
+    along.addColorStop(0, "#5a5a5a"); along.addColorStop(0.3, "#d8d8d8"); along.addColorStop(0.75, "#f6f6f6"); along.addColorStop(1, "#e2e2e2");
+    c.fillStyle = along; c.fill();
+    const across = c.createLinearGradient(0, -w, 0, w); // edges curl away from the light
+    across.addColorStop(0, "rgba(0,0,0,.28)"); across.addColorStop(0.35, "rgba(0,0,0,0)");
+    across.addColorStop(0.65, "rgba(0,0,0,0)"); across.addColorStop(1, "rgba(0,0,0,.18)");
+    c.fillStyle = across; c.fill();
+    c.strokeStyle = "rgba(0,0,0,.16)"; c.lineWidth = Math.max(0.5, r * 0.012);
+    for (const k of [-0.35, 0, 0.35]) { c.beginPath(); c.moveTo(r * 0.12, 0); c.quadraticCurveTo(r * 0.5, w * k * 0.6, r * 0.82, w * k); c.stroke(); }
   }
-  function flower(c, x, y, r) {
-    c.save(); c.translate(x, y); c.rotate(rr(0, TAU)); c.scale(1, rr(0.55, 1)); // tilted towards/away from us
-    const off = rr(0, TAU);
-    for (let k = 0; k < 5; k++) { c.save(); c.rotate(off + k / 5 * TAU + rr(-0.15, 0.15)); petal(c, r * rr(0.85, 1.05)); c.restore(); }
-    const h = c.createRadialGradient(0, 0, 0, 0, 0, r * 0.38);
-    h.addColorStop(0, "#1a1a1a"); h.addColorStop(1, "rgba(30,30,30,0)");
-    c.fillStyle = h; c.beginPath(); c.arc(0, 0, r * 0.38, 0, TAU); c.fill();
-    c.lineWidth = Math.max(0.5, r * 0.025);
-    for (let k = 0; k < 12; k++) { // stamens
-      const a = rr(0, TAU), l = r * rr(0.22, 0.42), sx = Math.cos(a) * l, sy = Math.sin(a) * l;
-      c.strokeStyle = "#aaa"; c.beginPath(); c.moveTo(0, 0); c.lineTo(sx, sy); c.stroke();
-      c.fillStyle = "#fff"; c.beginPath(); c.arc(sx, sy, r * 0.04, 0, TAU); c.fill();
+  function flower(c, x, y, r, open) {
+    c.save(); c.translate(x, y); c.rotate(rr(0, TAU)); c.scale(1, rr(0.5, 1)); // tilted towards/away from us
+    const off = rr(0, TAU), n = open ? 5 : 3;
+    for (let k = 0; k < n; k++) {
+      c.save(); c.rotate(off + k / n * (open ? TAU : 2.2) + rr(-0.18, 0.18));
+      petal(c, r * (open ? rr(0.85, 1.05) : rr(0.55, 0.7))); c.restore();
+    }
+    if (open) {
+      const h = c.createRadialGradient(0, 0, 0, 0, 0, r * 0.4);
+      h.addColorStop(0, "#111"); h.addColorStop(0.6, "rgba(25,25,25,.6)"); h.addColorStop(1, "rgba(30,30,30,0)");
+      c.fillStyle = h; c.beginPath(); c.arc(0, 0, r * 0.4, 0, TAU); c.fill();
+      c.lineWidth = Math.max(0.4, r * 0.018);
+      for (let k = 0; k < 22; k++) { // stamens: pale filaments, grey anthers
+        const a = rr(0, TAU), l = r * rr(0.2, 0.45), sx = Math.cos(a) * l, sy = Math.sin(a) * l;
+        c.strokeStyle = "rgba(220,220,220,.8)"; c.beginPath(); c.moveTo(0, 0); c.quadraticCurveTo(sx * 0.5 + rr(-2, 2), sy * 0.5 + rr(-2, 2), sx, sy); c.stroke();
+        c.fillStyle = rand() < 0.3 ? "#eee" : "#8a8a8a"; c.beginPath(); c.arc(sx, sy, r * rr(0.025, 0.045), 0, TAU); c.fill();
+      }
     }
     c.restore();
   }
   function bud(c, x, y, r, a) {
     c.save(); c.translate(x, y); c.rotate(a);
-    const gr = c.createLinearGradient(-r, 0, r, 0); gr.addColorStop(0, "#555"); gr.addColorStop(1, "#eee");
-    c.fillStyle = gr; c.beginPath(); c.ellipse(0, 0, r, r * 0.6, 0, 0, TAU); c.fill(); c.restore();
+    const gr = c.createRadialGradient(r * 0.3, -r * 0.2, 0, 0, 0, r);
+    gr.addColorStop(0, "#f2f2f2"); gr.addColorStop(1, "#555");
+    c.fillStyle = gr; c.beginPath(); c.ellipse(0, 0, r, r * 0.62, 0, 0, TAU); c.fill();
+    c.fillStyle = "#222"; c.beginPath(); c.ellipse(-r * 0.85, 0, r * 0.35, r * 0.4, 0, 0, TAU); c.fill(); // sepals
+    c.restore();
   }
   function leaf(c, x, y, r, a) {
     c.save(); c.translate(x, y); c.rotate(a);
-    const gr = c.createLinearGradient(0, 0, r, 0); gr.addColorStop(0, "#151515"); gr.addColorStop(1, "#4a4a4a");
+    const gr = c.createLinearGradient(0, -r * 0.4, 0, r * 0.4);
+    gr.addColorStop(0, "#3c3c3c"); gr.addColorStop(0.5, "#262626"); gr.addColorStop(1, "#121212");
     c.fillStyle = gr; c.beginPath(); c.moveTo(0, 0);
-    c.quadraticCurveTo(r * 0.5, -r * 0.38, r, 0); c.quadraticCurveTo(r * 0.5, r * 0.38, 0, 0); c.fill(); c.restore();
+    c.bezierCurveTo(r * 0.3, -r * 0.42, r * 0.75, -r * 0.3, r, 0); c.bezierCurveTo(r * 0.75, r * 0.3, r * 0.3, r * 0.42, 0, 0); c.fill();
+    c.strokeStyle = "rgba(255,255,255,.12)"; c.lineWidth = 0.8; c.beginPath(); c.moveTo(0, 0); c.lineTo(r * 0.9, 0); c.stroke();
+    c.restore();
+  }
+  // a blossom, sometimes out of focus / in shadow so the cluster has depth
+  function bloom(c, x, y, rad, bx, by) {
+    c.strokeStyle = "#2a2a2a"; c.lineWidth = Math.max(1, rad * 0.06); // pedicel back to the twig
+    c.beginPath(); c.moveTo(bx, by); c.quadraticCurveTo((bx + x) / 2 + rr(-4, 4), (by + y) / 2 + rr(-4, 4), x, y); c.stroke();
+    const depth = rand();
+    c.save();
+    c.globalAlpha = depth < 0.25 ? 0.45 : depth < 0.5 ? 0.75 : 1;
+    if (depth < 0.25) c.filter = "blur(2px)";
+    flower(c, x, y, rad, rand() > 0.15);
+    c.restore();
   }
   function grow(c, x, y, a, len, w, depth, tips) {
     const bend = rr(-0.35, 0.35);
     const mx = x + Math.cos(a + bend * 0.5) * len * 0.5, my = y + Math.sin(a + bend * 0.5) * len * 0.5;
     const ex = x + Math.cos(a + bend) * len, ey = y + Math.sin(a + bend) * len;
     c.lineCap = "round";
-    c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(mx, my, ex, ey);
-    c.strokeStyle = "#333"; c.lineWidth = w; c.stroke();
-    c.strokeStyle = "rgba(255,255,255,.1)"; c.lineWidth = w * 0.3; c.stroke();
+    for (let q = 0; q < 6; q++) { // taper along the segment, with a bit of bark light on one side
+      const t0 = q / 6, t1 = (q + 1) / 6, P = tt => [(1 - tt) ** 2 * x + 2 * (1 - tt) * tt * mx + tt * tt * ex, (1 - tt) ** 2 * y + 2 * (1 - tt) * tt * my + tt * tt * ey];
+      const [x0, y0] = P(t0), [x1, y1] = P(t1), ww = w * (1 - t0 * 0.3);
+      c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1);
+      c.strokeStyle = "#262626"; c.lineWidth = ww; c.stroke();
+      c.strokeStyle = "rgba(255,255,255,.09)"; c.lineWidth = ww * 0.25;
+      c.beginPath(); c.moveTo(x0 - ww * 0.25, y0 - ww * 0.25); c.lineTo(x1 - ww * 0.25, y1 - ww * 0.25); c.stroke();
+    }
+    if (rand() < 0.4) { c.fillStyle = "#303030"; c.beginPath(); c.arc(ex, ey, w * 0.55, 0, TAU); c.fill(); } // knot
     tips.push([ex, ey, a + bend, depth, mx, my]);
     if (depth <= 0) return;
     const kids = depth > 2 ? 2 : 1 + (rand() < 0.5);
-    for (let k = 0; k < kids; k++) grow(c, ex, ey, a + bend + rr(-0.75, 0.75), len * rr(0.6, 0.8), w * 0.66, depth - 1, tips);
+    for (let k = 0; k < kids; k++) grow(c, ex, ey, a + bend + rr(-0.75, 0.75), len * rr(0.6, 0.8), w * 0.7, depth - 1, tips);
   }
 
   let clusters = [], spots = [], r = 20;
@@ -206,7 +210,8 @@ requestAnimationFrame(frame);
     r = Math.max(10, Math.min(30, m * 0.04));
     const reach = m * 0.3;
     // anchor x, anchor y, direction, size, depth
-    clusters = [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4]].map(([ax, ay, a, len, d], i) => {
+    clusters = [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4],
+      [-8, H * 0.98, -Math.PI / 2 + 0.3, reach * 0.6, 3], [-8, -8, Math.PI / 2 - 0.35, reach * 0.45, 3]].map(([ax, ay, a, len, d], i) => {
       const cv = document.createElement("canvas"); cv.width = W * dpr; cv.height = H * dpr;
       const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
       const tips = [];
@@ -217,7 +222,7 @@ requestAnimationFrame(frame);
           const n = 1 + (rand() < 0.45);
           for (let k = 0; k < n; k++) {
             const fx = x + rr(-1.6, 1.6) * r, fy = y + rr(-1.6, 1.6) * r;
-            flower(c, fx, fy, r * rr(0.75, 1.1)); spots.push([fx, fy]);
+            bloom(c, fx, fy, r * rr(0.75, 1.1), x, y); spots.push([fx, fy]);
           }
           if (rand() < 0.6) bud(c, x + Math.cos(ang) * r * 1.3, y + Math.sin(ang) * r * 1.3, r * 0.3, ang);
         }

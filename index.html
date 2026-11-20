@@ -270,7 +270,15 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
   }
 
   let prev = 0;
-  addEventListener("pointermove", e => { ptr.x = e.clientX; ptr.y = e.clientY; });
+  // cursor trail: a few ascii sparks that drift down and fade; mouse only, not touch
+  const trail = [], SPARK = ".:*+·", tx = { x: 0, y: 0 };
+  addEventListener("pointermove", e => {
+    ptr.x = e.clientX; ptr.y = e.clientY;
+    if (still || e.pointerType !== "mouse" || Math.hypot(e.clientX - tx.x, e.clientY - tx.y) < 9) return;
+    tx.x = e.clientX; tx.y = e.clientY;
+    trail.push({ x: e.clientX + (rnd() - .5) * 6, y: e.clientY + (rnd() - .5) * 6, age: 0, ch: SPARK[rnd() * SPARK.length | 0] });
+    if (trail.length > 40) trail.shift();
+  });
   document.addEventListener("pointerleave", () => { ptr.x = ptr.y = -1e4; });
   addEventListener("pointerdown", e => { if (!still && !e.target.closest("a, input, #term, canvas#heatmap")) shake(e.clientX, e.clientY); });
   function draw(ms) { // only the falling petals animate: a clear plus a few small sprites per frame
@@ -290,6 +298,13 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
       pg.scale(p.k, p.k * (0.6 + 0.4 * Math.sin(t * 1.5 + p.ph))); // flutter
       pg.globalAlpha = 0.85; pg.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); pg.globalAlpha = 1;
     }
+    pg.setTransform(dpr, 0, 0, dpr, 0, 0); pg.fillStyle = "#fff"; pg.textAlign = "center"; pg.textBaseline = "middle";
+    for (let i = trail.length - 1; i >= 0; i--) {
+      const s = trail[i]; s.age += dt; s.y += 14 * dt;
+      if (s.age > 0.6) { trail.splice(i, 1); continue; }
+      pg.globalAlpha = (1 - s.age / 0.6) * 0.8; pg.font = `${16 - s.age * 12 | 0}px VT323, monospace`; pg.fillText(s.ch, s.x, s.y);
+    }
+    pg.globalAlpha = 1;
     requestAnimationFrame(draw);
   }
   garden.regrow = () => {

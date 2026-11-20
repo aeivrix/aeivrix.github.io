@@ -260,15 +260,15 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
 
   let prev = 0;
   // cursor trail: 1-bit pixel smoke, an ordered (bayer) dither on a 3px grid that thins out as it fades; mouse only
-  const trail = [], tx = { x: -1, y: 0 }, PX = 3, BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const trail = [], tx = { x: -1, y: 0 }, PX = 2, BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   addEventListener("pointermove", e => {
     ptr.x = e.clientX; ptr.y = e.clientY;
     if (still || e.pointerType !== "mouse") return;
     if (tx.x < 0) { tx.x = e.clientX; tx.y = e.clientY; }
-    const dx = e.clientX - tx.x, dy = e.clientY - tx.y, n = Math.hypot(dx, dy) / 6 | 0; // a puff every 6px along the path
+    const dx = e.clientX - tx.x, dy = e.clientY - tx.y, n = Math.hypot(dx, dy) / 4 | 0; // a puff every 4px along the path
     for (let i = 1; i <= n; i++) trail.push({ x: tx.x + dx * i / n, y: tx.y + dy * i / n, age: 0 });
     if (n) { tx.x = e.clientX; tx.y = e.clientY; }
-    if (trail.length > 60) trail.splice(0, trail.length - 60);
+    if (trail.length > 90) trail.splice(0, trail.length - 90);
   });
   document.addEventListener("pointerleave", () => { tx.x = -1; });
   function draw(ms) { // only the falling petals animate: a clear plus a few small sprites per frame
@@ -290,10 +290,10 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
     for (let i = trail.length - 1; i >= 0; i--) {
       const s = trail[i]; s.age += dt;
       if (s.age > 0.55) { trail.splice(i, 1); continue; }
-      const f = 1 - s.age / 0.55, r = 2 + 9 * f, lvl = f * f * 13, y0 = s.y - s.age * 20; // smoke drifts up
+      const f = 1 - s.age / 0.55, r = 1 + 4 * f, lvl = f * f * 13, y0 = s.y - s.age * 20; // smoke drifts up
       for (let gy = Math.floor((y0 - r) / PX); gy <= (y0 + r) / PX; gy++) for (let gx = Math.floor((s.x - r) / PX); gx <= (s.x + r) / PX; gx++) {
         const ddx = gx * PX - s.x, ddy = gy * PX - y0;
-        if (ddx * ddx + ddy * ddy < r * r && BAYER[(gy & 3) * 4 + (gx & 3)] < lvl * (1 - Math.hypot(ddx, ddy) / r * 0.6)) pg.fillRect(gx * PX, gy * PX, PX - 1, PX - 1);
+        if (ddx * ddx + ddy * ddy < r * r && BAYER[(gy & 3) * 4 + (gx & 3)] < lvl * (1 - Math.hypot(ddx, ddy) / r * 0.6)) pg.fillRect(gx * PX, gy * PX, PX, PX);
       }
     }
     pg.globalAlpha = 1;

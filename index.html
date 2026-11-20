@@ -11,12 +11,12 @@
 <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; }
-  html { height: 100%; background: #000; color: #fff; }
-  body { height: 100%; padding: clamp(28px, min(7vw, 11vh), 100px); font-family: "VT323", monospace; }
+  html { height: 100%; overflow: hidden; background: #000; color: #fff; }
+  body { height: 100%; overflow: hidden; font-family: "VT323", monospace; }
   main {
-    position: relative; height: 100%; overflow: auto;
-    border: 2px solid #fff; border-radius: 24px;
-    padding: clamp(20px, 4vw, 48px) clamp(20px, 6vw, 72px) clamp(40px, 5vw, 60px);
+    position: relative; height: 100%; overflow: hidden;
+    border-radius: 24px;
+    padding: clamp(24px, 6vh, 64px) clamp(24px, 12vw, 172px) clamp(40px, 8vh, 80px);
     display: flex; flex-direction: column; justify-content: safe center;
   }
   h1 { margin: 0; }
@@ -26,13 +26,13 @@
   /* load-in: blossoms bloom in first, then the box rises in */
   @keyframes bloom { from { opacity: 0; } }
   @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
-  #bg, #petals { animation: bloom 1.6s ease-out both; }
+  #petals { animation: bloom 1.6s ease-out both; }
   main, .meta { animation: rise 1s ease-out 1.3s both; }
-  @media (prefers-reduced-motion: reduce) { #bg, #petals, main, .meta { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { #petals, main, .meta { animation: none; } }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
   .cols { display: grid; grid-template-columns: minmax(0, 25rem) minmax(0, 340px); gap: clamp(24px, 6vw, 96px); margin-top: 1.5rem; align-items: start; }
-  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } main { overflow: auto; } }
   p { font-size: clamp(18px, 2vw, 24px); line-height: 1.2; color: #bbb; }
   a { color: #fff; text-decoration: none; }
   a:hover, a:focus-visible { background: #fff; color: #000; outline: none; }
@@ -52,7 +52,7 @@
   #heatmap { display: block; image-rendering: pixelated; }
 
   /* sits in the margin under the frame */
-  .meta { position: fixed; z-index: 2; left: clamp(28px, min(7vw, 11vh), 100px); bottom: max(4px, calc(clamp(28px, min(7vw, 11vh), 100px) / 2 - 9px)); font-size: 14px; color: #666; }
+  .meta { position: fixed; z-index: 2; left: clamp(24px, 12vw, 172px); bottom: clamp(10px, 2.5vh, 24px); font-size: 14px; color: #666; }
   .meta a { color: #777; padding: 0 .2em; }
 
   #term { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; justify-content: flex-end;
@@ -192,10 +192,9 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
   const bg = document.getElementById("bg"), g = bg.getContext("2d");
   let wasm, spots = [], sprite, sw = 0, sh = 0, piled = 0;
   // replay the rust command stream; opcodes/arities must match blossom/src/lib.rs
-  function replay(c, b) {
+  function replay(c, b, i = 0, until = Infinity, onSprite = null) {
     const S = (k, a) => `rgba(${k},${k},${k},${a})`;
     const fillGrad = gr => { const n = b[i++]; for (let k = 0; k < n; k++, i += 3) gr.addColorStop(b[i], S(b[i + 1], b[i + 2])); c.fillStyle = gr; c.fill(); };
-    let i = 0;
     while (i < b.length) switch (b[i++]) {
       case 0: c.save(); break;
       case 1: c.restore(); break;
@@ -215,11 +214,46 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
       case 15: { const gr = c.createRadialGradient(b[i], b[i + 1], b[i + 2], b[i + 3], b[i + 4], b[i + 5]); i += 6; fillGrad(gr); break; }
       case 16: c.globalAlpha = b[i++]; break;
       case 18: c.lineCap = "round"; break;
+      case 19: if (b[i] > until) return i - 1; i++; break; // growth time tag
+      case 21: { // a piece that can be animated opening: x y half n, then its n floats
+        const x = b[i], y = b[i + 1], h = b[i + 2], body = b.subarray(i + 4, i + 4 + b[i + 3]); i += 4 + b[i + 3];
+        onSprite ? onSprite(x, y, h, body) : replay(c, body);
+        break;
+      }
     }
+    return i;
   }
   const commands = n => new Float32Array(wasm.memory.buffer, wasm.commands(), n); // fresh view: memory may have grown
   const pc = document.getElementById("petals"), pg = pc.getContext("2d");
-  let dpr = 1;
+  let dpr = 1, growId = 0, opening = [];
+  const GROW = still ? 0 : 4200; // ms for the trees to grow out from the corners
+  // branches: each piece is extended a little every frame, like a pen stroke, straight onto #bg
+  function growLimbs(st, at) {
+    const L = st.L;
+    g.save(); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.lineCap = "round";
+    for (let j = 0; j < st.done.length; j++) {
+      const o = j * 7, t0 = L[o + 5], q = st.done[j];
+      if (q >= 1 || at <= t0) continue;
+      const p = Math.min(1, (at - t0) / Math.max(1e-6, L[o + 6] - t0));
+      const x0 = L[o], y0 = L[o + 1], dx = L[o + 2] - x0, dy = L[o + 3] - y0, w = L[o + 4];
+      g.beginPath(); g.moveTo(x0 + dx * q, y0 + dy * q); g.lineTo(x0 + dx * p, y0 + dy * p);
+      g.strokeStyle = "rgb(38,38,38)"; g.lineWidth = w; g.stroke();
+      if (p >= 1) { // a line of bark light on one side, once the piece is whole
+        const s = w * 0.25; g.beginPath(); g.moveTo(x0 - s, y0 - s); g.lineTo(x0 + dx - s, y0 + dy - s);
+        g.strokeStyle = "rgba(255,255,255,0.09)"; g.lineWidth = s; g.stroke();
+      }
+      st.done[j] = p;
+    }
+    g.restore();
+  }
+  // blossoms, leaves and buds: drawn once into a small canvas, then unfurled on #petals before settling onto #bg
+  function sprout(x, y, h, body) {
+    const S = Math.ceil(h * 2 * dpr) + 2, cv = document.createElement("canvas"), ox = Math.floor(x * dpr - S / 2) / dpr, oy = Math.floor(y * dpr - S / 2) / dpr;
+    cv.width = cv.height = S;
+    const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, -ox * dpr, -oy * dpr); c.lineCap = "round";
+    replay(c, body);
+    opening.push({ cv, x, y, ox, oy, s: S / dpr, t: performance.now(), spin: (rnd() - 0.5) * 1.6 });
+  }
   // branches are drawn once per layout straight into #bg; nothing redraws them per frame
   function layout() {
     dpr = Math.min(2, devicePixelRatio || 1);
@@ -230,11 +264,24 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
     const k = W < 700 ? 0.7 : 1; // smaller trees on phones so they stay off the text
     const r = Math.max(8, Math.min(30, m * 0.04)) * k, reach = m * 0.3 * k;
     wasm.reset(seed);
-    // anchor x, anchor y, heading, reach, depth
-    for (const [ax, ay, a, len, d] of [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4],
-      [-8, H * 0.98, -Math.PI / 2 + 0.3, reach * 0.6, 3], [-8, -8, Math.PI / 2 - 0.35, reach * 0.45, 3]]) {
-      g.save(); replay(g, commands(wasm.cluster(ax, ay, a, len, d, r))); g.restore();
-    }
+    // anchor x, anchor y, heading, reach, depth; copied out because the next call reuses the buffer
+    const streams = [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4],
+      [-8, H * 0.98, -Math.PI / 2 + 0.3, reach * 0.6, 3], [-8, -8, Math.PI / 2 - 0.35, reach * 0.45, 3]]
+      .map(([ax, ay, a, len, d]) => {
+        const b = commands(wasm.cluster(ax, ay, a, len, d, r)).slice(), n = wasm.limb_count();
+        return { b, i: 0, L: new Float32Array(wasm.memory.buffer, wasm.limbs(), n * 7).slice(), done: new Float32Array(n) };
+      });
+    opening = [];
+    // grow: each frame draws the next pieces (in the order rust tagged them) straight onto #bg, nothing is redrawn
+    const t0 = performance.now(), id = ++growId;
+    const step = ms => {
+      if (id !== growId) return; // a newer layout took over
+      const k = GROW ? Math.min(1, (ms - t0) / GROW) : 1, at = k < 1 ? 1 - (1 - k) ** 2 : 1; // fast at first, slowing at the tips
+      for (const st of streams) { growLimbs(st, at); st.i = replay(g, st.b, st.i, k < 1 ? at : Infinity, GROW ? sprout : null); }
+      if (k < 1) requestAnimationFrame(step);
+    };
+    step(t0);
+    for (const p of falling) p.wait = GROW / 1000 + rnd() * 8; // petals start falling once there are flowers
     spots = Array.from(new Float32Array(wasm.memory.buffer, wasm.spots(), wasm.spot_count() * 2));
     // one loose petal, drawn once, reused for every falling petal
     const s = r * 0.5; sw = s * 1.1 + 4; sh = s * 1.6;
@@ -253,7 +300,7 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
   function land(p, x) { // stamp the petal into #bg so the pile costs nothing per frame
     if (piled > 220) return;
     piled++;
-    g.save(); g.globalAlpha = 0.5 + rnd() * 0.35;
+    g.save(); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.globalAlpha = 0.5 + rnd() * 0.35;
     g.translate(x, innerHeight - 2 - rnd() * Math.min(14, piled / 12)); g.rotate((rnd() - 0.5) * 0.8); g.scale(p.k, p.k * 0.45);
     g.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); g.restore();
   }
@@ -275,6 +322,16 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
     const t = ms / 1000, dt = Math.min(0.05, (ms - prev) / 1000); prev = ms;
     pg.setTransform(1, 0, 0, 1, 0, 0);
     pg.clearRect(0, 0, pc.width, pc.height);
+    for (let i = opening.length - 1; i >= 0; i--) { // unfurl: overshoot a little and untwist, then settle onto #bg
+      const o = opening[i], k = Math.min(1, Math.max(0, (ms - o.t) / 750)), u = k - 1, e = 1 + 2.4 * u * u * u + 1.4 * u * u;
+      if (k >= 1) {
+        g.save(); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.drawImage(o.cv, o.ox, o.oy, o.s, o.s); g.restore();
+        opening.splice(i, 1); continue;
+      }
+      pg.setTransform(dpr, 0, 0, dpr, 0, 0); pg.translate(o.x, o.y); pg.rotate(o.spin * u * u); pg.scale(e, e);
+      pg.globalAlpha = Math.min(1, k * 2.5); pg.drawImage(o.cv, o.ox - o.x, o.oy - o.y, o.s, o.s);
+    }
+    pg.globalAlpha = 1;
     for (const p of falling) {
       if (p.wait > 0) { p.wait -= dt; if (p.wait <= 0 && spots.length) drop(p); continue; }
       p.y += p.vy * dt; p.rot += p.vr * dt;
@@ -303,9 +360,7 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
     newSeed();
     if (!wasm) return;
     layout();
-    for (const p of falling) settle(p);
     trail.length = 0;
-    if (!still) bg.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1400, easing: "ease-out" });
   };
   garden.sweep = () => { if (wasm) layout(); return piled; };
   garden.piled = () => piled;
@@ -313,7 +368,7 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
   // one relayout after resizing settles, instead of one per resize event
   let pending;
   addEventListener("resize", () => { clearTimeout(pending); pending = setTimeout(() => { window.sizeName(); if (wasm) layout(); }, 150); });
-  WebAssembly.instantiateStreaming(fetch("blossom.wasm")).then(({ instance }) => {
+  WebAssembly.instantiateStreaming(fetch("blossom.wasm?v=3")).then(({ instance }) => {
     wasm = instance.exports; layout(); if (!still) requestAnimationFrame(draw);
   }).catch(() => {}); // no wasm, no flowers; the page still works
 }

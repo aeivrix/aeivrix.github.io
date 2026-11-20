@@ -259,15 +259,18 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
   }
 
   let prev = 0;
-  // cursor trail: tiny petals shed from the cursor that flutter down and fade; mouse only, not touch
-  const trail = [], tx = { x: 0, y: 0 };
+  // cursor trail: 1-bit pixel smoke, an ordered (bayer) dither on a 3px grid that thins out as it fades; mouse only
+  const trail = [], tx = { x: -1, y: 0 }, PX = 3, BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   addEventListener("pointermove", e => {
     ptr.x = e.clientX; ptr.y = e.clientY;
-    if (still || !sprite || e.pointerType !== "mouse" || Math.hypot(e.clientX - tx.x, e.clientY - tx.y) < 16) return;
-    tx.x = e.clientX; tx.y = e.clientY;
-    trail.push({ x: e.clientX, y: e.clientY, vx: (rnd() - .5) * 30, age: 0, life: 0.9 + rnd() * 0.5, rot: rnd() * TAU, vr: (rnd() - .5) * 6, ph: rnd() * TAU, k: 0.5 + rnd() * 0.3 });
-    if (trail.length > 30) trail.shift();
+    if (still || e.pointerType !== "mouse") return;
+    if (tx.x < 0) { tx.x = e.clientX; tx.y = e.clientY; }
+    const dx = e.clientX - tx.x, dy = e.clientY - tx.y, n = Math.hypot(dx, dy) / 6 | 0; // a puff every 6px along the path
+    for (let i = 1; i <= n; i++) trail.push({ x: tx.x + dx * i / n, y: tx.y + dy * i / n, age: 0 });
+    if (n) { tx.x = e.clientX; tx.y = e.clientY; }
+    if (trail.length > 60) trail.splice(0, trail.length - 60);
   });
+  document.addEventListener("pointerleave", () => { tx.x = -1; });
   function draw(ms) { // only the falling petals animate: a clear plus a few small sprites per frame
     const t = ms / 1000, dt = Math.min(0.05, (ms - prev) / 1000); prev = ms;
     pg.setTransform(1, 0, 0, 1, 0, 0);
@@ -283,15 +286,15 @@ const garden = {}; // regrow / sweep, used by the shell and the seed link
       pg.scale(p.k, p.k * (0.6 + 0.4 * Math.sin(t * 1.5 + p.ph))); // flutter
       pg.globalAlpha = 0.85; pg.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); pg.globalAlpha = 1;
     }
+    pg.setTransform(dpr, 0, 0, dpr, 0, 0); pg.fillStyle = "#fff";
     for (let i = trail.length - 1; i >= 0; i--) {
       const s = trail[i]; s.age += dt;
-      if (s.age > s.life) { trail.splice(i, 1); continue; }
-      s.x += s.vx * dt; s.y += (8 + s.age * 40) * dt; s.rot += s.vr * dt; s.vx *= Math.pow(0.4, dt);
-      const f = 1 - s.age / s.life;
-      pg.setTransform(dpr, 0, 0, dpr, 0, 0);
-      pg.translate(s.x + Math.sin(s.age * 5 + s.ph) * 4, s.y); pg.rotate(s.rot);
-      pg.scale(s.k, s.k * (0.5 + 0.5 * Math.sin(s.age * 9 + s.ph)));
-      pg.globalAlpha = Math.min(1, f * 1.6) * 0.9; pg.drawImage(sprite, -sw / 2, -sh / 2, sw, sh);
+      if (s.age > 0.55) { trail.splice(i, 1); continue; }
+      const f = 1 - s.age / 0.55, r = 2 + 9 * f, lvl = f * f * 13, y0 = s.y - s.age * 20; // smoke drifts up
+      for (let gy = Math.floor((y0 - r) / PX); gy <= (y0 + r) / PX; gy++) for (let gx = Math.floor((s.x - r) / PX); gx <= (s.x + r) / PX; gx++) {
+        const ddx = gx * PX - s.x, ddy = gy * PX - y0;
+        if (ddx * ddx + ddy * ddy < r * r && BAYER[(gy & 3) * 4 + (gx & 3)] < lvl * (1 - Math.hypot(ddx, ddy) / r * 0.6)) pg.fillRect(gx * PX, gy * PX, PX - 1, PX - 1);
+      }
     }
     pg.globalAlpha = 1;
     requestAnimationFrame(draw);

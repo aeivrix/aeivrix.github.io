@@ -54,11 +54,14 @@
   /* sits in the margin under the frame */
   .meta { position: fixed; z-index: 2; left: clamp(28px, min(7vw, 11vh), 100px); bottom: max(4px, calc(clamp(28px, min(7vw, 11vh), 100px) / 2 - 9px)); font-size: 14px; color: #666; }
   .meta a { color: #777; padding: 0 .2em; }
+  @media (max-width: 760px), (prefers-reduced-motion: reduce) { .hint { display: none; } }
 
   #term { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; justify-content: flex-end;
     padding: clamp(20px, 4vw, 40px); border-radius: 22px; background: rgba(0,0,0,.95); font-size: 20px; }
   #term[hidden] { display: none; }
   #tout { font: inherit; color: #bbb; white-space: pre-wrap; overflow: auto; }
+  .nf { display: flex; flex-wrap: wrap; gap: 1.2em; align-items: center; margin: .3em 0 .8em; }
+  .nf canvas { width: 200px; height: 200px; image-rendering: pixelated; border: 1px solid #333; }
   .prompt { display: flex; gap: .5em; color: #fff; }
   #tin { flex: 1; min-width: 0; background: none; border: 0; color: #fff; font: inherit; outline: none; caret-color: #fff; }
 </style>
@@ -91,12 +94,13 @@
     <label class="prompt"><span>aeivrix@web:~$</span><input id="tin" autocomplete="off" spellcheck="false" aria-label="command"></label>
   </div>
 </main>
-<footer class="meta">flowers grown in rust/wasm · seed <span id="seed"></span> · <a href="https://github.com/aeivrix/aeivrix.github.io/blob/main/blossom/src/lib.rs">source</a> · <a href="#" id="shell">~ shell</a></footer>
+<footer class="meta">flowers grown in rust/wasm · seed <a href="#" id="seed" title="grow a new tree"></a> · <a href="https://github.com/aeivrix/aeivrix.github.io/blob/main/blossom/src/lib.rs">source</a> · <a href="#" id="shell">~ shell</a><span class="hint"> · click to shake</span></footer>
 <canvas id="bg" aria-hidden="true"></canvas>
 <canvas id="petals" aria-hidden="true"></canvas>
 <script>
 const rnd = Math.random, TAU = Math.PI * 2;
 const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ptr = { x: -1e4, y: -1e4 }; // cursor, shared by the name and the petals
 
 // ---- name: 7-row lowercase pixel glyphs; each lit pixel becomes SUBxSUB ascii chars
 const G = {
@@ -107,37 +111,87 @@ const G = {
   r: [".....", ".....", "#.##.", "##..#", "#....", "#....", "#...."],
   x: [".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#"],
 };
-const SUB = 5, SOLID = "#@%&$8B", P = [];
+const SUB = 5, SOLID = "#@%&$8B", NOISE = "01<>/\\*+=-:;", GLYPHS = SOLID + NOISE, P = [];
 let cols = 0;
 for (const ch of "aeivrix") {
   G[ch].forEach((row, y) => [...row].forEach((c, x) => {
     if (c !== "#") return;
     for (let sy = 0; sy < SUB; sy++) for (let sx = 0; sx < SUB; sx++)
-      P.push({ gx: (cols + x) * SUB + sx, gy: y * SUB + sy, ch: SOLID[rnd() * SOLID.length | 0] });
+      P.push({ gx: (cols + x) * SUB + sx, gy: y * SUB + sy, c: rnd() * SOLID.length | 0, ox: 0, oy: 0, vx: 0, vy: 0, at: 0 });
   }));
   cols += G[ch][0].length + 1;
 }
 cols = (cols - 1) * SUB;
 const rows = 7 * SUB;
-const slot = document.getElementById("slot"), nameCv = document.getElementById("name"), nctx = nameCv.getContext("2d");
-function size() {
-  const dpr = devicePixelRatio || 1, cell = Math.min(slot.clientWidth / cols, 4.5, innerHeight * 0.0065); // fractional on phones, never overflows
-  const w = cols * cell, h = rows * cell;
-  nameCv.style.width = w + "px"; nameCv.style.height = h + "px";
-  nameCv.width = Math.ceil(w * dpr); nameCv.height = Math.ceil(h * dpr);
-  nctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  nctx.font = `bold ${cell * 1.25}px ui-monospace, Menlo, monospace`; nctx.textBaseline = "top"; nctx.fillStyle = "#fff";
-  for (const p of P) nctx.fillText(p.ch, p.gx * cell, p.gy * cell);
+{
+  const slot = document.getElementById("slot"), cv = document.getElementById("name"), c = cv.getContext("2d");
+  let cell = 1, w = 0, h = 0, atlas = [], as = 0, running = false, prev = 0;
+  // intro: chars decode left to right once the frame has risen in (css delay 1.3s)
+  const t0 = performance.now() + 1300;
+  for (const p of P) p.at = still ? 0 : t0 + (p.gx / cols) * 900 + rnd() * 350;
+  function size() {
+    const dpr = devicePixelRatio || 1;
+    cell = Math.min(slot.clientWidth / cols, 4.5, innerHeight * 0.0065); // fractional on phones, never overflows
+    w = cols * cell; h = rows * cell;
+    cv.style.width = w + "px"; cv.style.height = h + "px";
+    cv.width = Math.ceil(w * dpr); cv.height = Math.ceil(h * dpr);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // every glyph pre-rendered once; frames are just drawImage
+    as = Math.ceil(cell * 1.6);
+    atlas = [...GLYPHS].map(ch => {
+      const a = document.createElement("canvas"); a.width = a.height = Math.ceil(as * dpr);
+      const x = a.getContext("2d"); x.scale(dpr, dpr);
+      x.font = `bold ${cell * 1.25}px ui-monospace, Menlo, monospace`; x.textBaseline = "top"; x.fillStyle = "#fff"; x.fillText(ch, 0, 0);
+      return a;
+    });
+    frame(performance.now());
+  }
+  function frame(ms) {
+    const dt = Math.min(0.033, (ms - prev) / 1000 || 0); prev = ms;
+    const r = cv.getBoundingClientRect(), mx = ptr.x - r.left, my = ptr.y - r.top, R = cell * 9, R2 = R * R;
+    let busy = false;
+    c.clearRect(0, 0, w, h);
+    for (const p of P) {
+      if (ms < p.at) { busy = true; continue; }
+      const px = p.gx * cell, py = p.gy * cell;
+      if (!still) {
+        const dx = px + p.ox - mx, dy = py + p.oy - my, d2 = dx * dx + dy * dy;
+        if (d2 < R2 && d2 > 0.01) { const d = Math.sqrt(d2), f = (1 - d / R) * 2600 * cell * dt; p.vx += dx / d * f; p.vy += dy / d * f; }
+        p.vx += (-p.ox * 140 - p.vx * 13) * dt; p.vy += (-p.oy * 140 - p.vy * 13) * dt; // spring home
+        p.ox += p.vx * dt; p.oy += p.vy * dt;
+        const off = Math.abs(p.ox) + Math.abs(p.oy);
+        if (off > 0.05 || Math.abs(p.vx) + Math.abs(p.vy) > 0.5) busy = true; else p.ox = p.oy = p.vx = p.vy = 0;
+        if (off > cell * 1.5 && rnd() < 0.15) p.c = rnd() * SOLID.length | 0; // knocked chars reshuffle
+      }
+      const young = ms - p.at < 260; // just decoded: still flickering noise
+      if (young) busy = true;
+      const g = young ? SOLID.length + (rnd() * NOISE.length | 0) : p.c;
+      c.drawImage(atlas[g], px + p.ox, py + p.oy, as, as);
+    }
+    running = busy && !still;
+    if (running) requestAnimationFrame(frame);
+  }
+  // wake the loop when the cursor comes near the name; it sleeps again once everything settles
+  addEventListener("pointermove", () => {
+    if (running || still) return;
+    const r = cv.getBoundingClientRect(), R = cell * 9;
+    if (ptr.x > r.left - R && ptr.x < r.right + R && ptr.y > r.top - R && ptr.y < r.bottom + R) { running = true; prev = performance.now(); requestAnimationFrame(frame); }
+  });
+  window.sizeName = size;
+  size();
+  if (!still) { running = true; requestAnimationFrame(frame); }
 }
-size();
 
 // ---- blossoms: geometry comes from blossom.wasm (rust, see blossom/src/lib.rs); a new seed every visit
-const SEED = crypto.getRandomValues(new Uint32Array(1))[0];
-const SEED_HEX = "0x" + SEED.toString(16).padStart(8, "0");
-document.getElementById("seed").textContent = SEED_HEX;
+let seed = 0;
+const hex = () => "0x" + seed.toString(16).padStart(8, "0");
+const garden = {}; // regrow / sweep, used by the shell and the seed link
 {
+  const seedEl = document.getElementById("seed");
+  const newSeed = () => { seed = crypto.getRandomValues(new Uint32Array(1))[0]; seedEl.textContent = hex(); };
+  newSeed();
   const bg = document.getElementById("bg"), g = bg.getContext("2d");
-  let wasm, spots = [], sprite, sw = 0, sh = 0;
+  let wasm, spots = [], sprite, sw = 0, sh = 0, piled = 0;
   // replay the rust command stream; opcodes/arities must match blossom/src/lib.rs
   function replay(c, b) {
     const S = (k, a) => `rgba(${k},${k},${k},${a})`;
@@ -171,11 +225,12 @@ document.getElementById("seed").textContent = SEED_HEX;
   function layout() {
     dpr = Math.min(2, devicePixelRatio || 1);
     const W = innerWidth, H = innerHeight, m = Math.min(W, H);
-    bg.width = pc.width = W * dpr; bg.height = pc.height = H * dpr;
+    bg.width = pc.width = W * dpr; bg.height = pc.height = H * dpr; // also wipes the petal pile
+    piled = 0;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const k = W < 700 ? 0.7 : 1; // smaller trees on phones so they stay off the text
     const r = Math.max(8, Math.min(30, m * 0.04)) * k, reach = m * 0.3 * k;
-    wasm.reset(SEED);
+    wasm.reset(seed);
     // anchor x, anchor y, heading, reach, depth
     for (const [ax, ay, a, len, d] of [[W + 8, H * 0.02, Math.PI - 1.05, reach, 4], [W * 0.93, H + 8, -Math.PI / 2 - 0.55, reach * 0.85, 4],
       [-8, H * 0.98, -Math.PI / 2 + 0.3, reach * 0.6, 3], [-8, -8, Math.PI / 2 - 0.35, reach * 0.45, 3]]) {
@@ -190,37 +245,73 @@ document.getElementById("seed").textContent = SEED_HEX;
     replay(c, commands(wasm.petal(s)));
   }
 
-  const falling = Array.from({ length: 6 }, () => ({ wait: rnd() * 12 }));
-  function drop(p) {
-    const k = (rnd() * spots.length / 2 | 0) * 2;
-    Object.assign(p, { x: spots[k], y: spots[k + 1], vy: 10 + rnd() * 12, ph: rnd() * TAU, rot: rnd() * TAU, vr: rnd() * 1.6 - 0.8, k: 0.7 + rnd() * 0.3, wait: 0 });
+  // 7 ambient petals that keep recycling, plus a pool that clicks shake loose
+  const falling = Array.from({ length: 48 }, (_, i) => ({ ambient: i < 7, wait: i < 7 ? rnd() * 10 : Infinity }));
+  function drop(p, k) {
+    k = k ?? (rnd() * spots.length / 2 | 0) * 2;
+    const fall = 10 + rnd() * 12;
+    Object.assign(p, { x: spots[k], y: spots[k + 1], vx: (rnd() - 0.5) * 30, vy: fall, fall, ph: rnd() * TAU, rot: rnd() * TAU, vr: rnd() * 1.6 - 0.8, k: 0.7 + rnd() * 0.3, wait: 0 });
   }
+  function shake(x, y) { // loosen petals from the blossoms nearest the click
+    if (!spots.length) return;
+    const near = [];
+    for (let k = 0; k < spots.length; k += 2) near.push([(spots[k] - x) ** 2 + (spots[k + 1] - y) ** 2, k]);
+    near.sort((a, b) => a[0] - b[0]);
+    let n = 9;
+    for (const p of falling) if (p.wait === Infinity && n-- > 0) { drop(p, near[rnd() * Math.min(24, near.length) | 0][1]); p.vy = p.fall * 2.5; p.vx *= 4; }
+  }
+  function settle(p) { p.wait = p.ambient ? 2 + rnd() * 8 : Infinity; }
+  function land(p, x) { // stamp the petal into #bg so the pile costs nothing per frame
+    if (piled > 220) return;
+    piled++;
+    g.save(); g.globalAlpha = 0.5 + rnd() * 0.35;
+    g.translate(x, innerHeight - 2 - rnd() * Math.min(14, piled / 12)); g.rotate((rnd() - 0.5) * 0.8); g.scale(p.k, p.k * 0.45);
+    g.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); g.restore();
+  }
+
   let prev = 0;
-  function draw(ms) { // only the falling petals animate: a clear plus six small sprites per frame
+  addEventListener("pointermove", e => { ptr.x = e.clientX; ptr.y = e.clientY; });
+  document.addEventListener("pointerleave", () => { ptr.x = ptr.y = -1e4; });
+  addEventListener("pointerdown", e => { if (!still && !e.target.closest("a, input, #term, canvas#heatmap")) shake(e.clientX, e.clientY); });
+  function draw(ms) { // only the falling petals animate: a clear plus a few small sprites per frame
     const t = ms / 1000, dt = Math.min(0.05, (ms - prev) / 1000); prev = ms;
     pg.setTransform(1, 0, 0, 1, 0, 0);
     pg.clearRect(0, 0, pc.width, pc.height);
     for (const p of falling) {
+      if (p.wait === Infinity) continue;
       if (p.wait > 0) { p.wait -= dt; if (p.wait <= 0 && spots.length) drop(p); continue; }
-      p.y += p.vy * dt; p.rot += p.vr * dt;
-      if (p.y > innerHeight + 20) { p.wait = 2 + rnd() * 8; continue; }
+      p.vx *= Math.pow(0.3, dt); p.vy += (p.fall - p.vy) * dt * 1.2; // shaken petals ease into a plain fall
+      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += (p.vr + p.vx * 0.01) * dt;
+      const x = p.x + Math.sin(t * 0.8 + p.ph) * 18;
+      if (p.y > innerHeight - 4) { land(p, x); settle(p); continue; }
+      if (x < -40 || x > innerWidth + 40 || p.y < -60) { settle(p); continue; }
       pg.setTransform(dpr, 0, 0, dpr, 0, 0);
-      pg.translate(p.x + Math.sin(t * 0.8 + p.ph) * 18, p.y); pg.rotate(p.rot);
+      pg.translate(x, p.y); pg.rotate(p.rot);
       pg.scale(p.k, p.k * (0.6 + 0.4 * Math.sin(t * 1.5 + p.ph))); // flutter
       pg.globalAlpha = 0.85; pg.drawImage(sprite, -sw / 2, -sh / 2, sw, sh); pg.globalAlpha = 1;
     }
     requestAnimationFrame(draw);
   }
+  garden.regrow = () => {
+    newSeed();
+    if (!wasm) return;
+    layout();
+    for (const p of falling) settle(p);
+    if (!still) bg.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1400, easing: "ease-out" });
+  };
+  garden.sweep = () => { if (wasm) layout(); return piled; };
+  garden.piled = () => piled;
+  seedEl.addEventListener("click", e => { e.preventDefault(); garden.regrow(); });
   // one relayout after resizing settles, instead of one per resize event
   let pending;
-  addEventListener("resize", () => { clearTimeout(pending); pending = setTimeout(() => { size(); if (wasm) layout(); }, 150); });
+  addEventListener("resize", () => { clearTimeout(pending); pending = setTimeout(() => { window.sizeName(); if (wasm) layout(); }, 150); });
   WebAssembly.instantiateStreaming(fetch("blossom.wasm")).then(({ instance }) => {
     wasm = instance.exports; layout(); if (!still) requestAnimationFrame(draw);
   }).catch(() => {}); // no wasm, no flowers; the page still works
 }
 
 // ---- live data: contribution heatmap (contrib.json, refreshed daily by an action), merged prs, repos
-const live = { repos: [], prs: [] };
+const live = { repos: [], prs: [], prTotal: 0, contribs: null };
 {
   const USER = "aeivrix";
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -233,23 +324,38 @@ const live = { repos: [], prs: [] };
 
   getJSON("contrib.json").then(d => {
     if (!d || !d.total) return;
-    const C = 5, GAP = 1, first = new Date(d.days[0][0] + "T00:00:00Z").getUTCDay();
+    live.contribs = d.total;
+    const C = 5, GAP = 1, S = C + GAP, first = new Date(d.days[0][0] + "T00:00:00Z").getUTCDay();
     const weeks = Math.ceil((d.days.length + first) / 7), max = Math.max(...d.days.map(x => x[1]));
-    const cv = document.getElementById("heatmap"), dpr = devicePixelRatio || 1, w = weeks * (C + GAP), h = 7 * (C + GAP);
+    const cv = document.getElementById("heatmap"), dpr = devicePixelRatio || 1, w = weeks * S, h = 7 * S;
     cv.style.width = w + "px"; cv.style.height = h + "px"; cv.width = w * dpr; cv.height = h * dpr;
     const c = cv.getContext("2d"); c.scale(dpr, dpr);
-    d.days.forEach(([, n], k) => {
+    const paint = hl => d.days.forEach(([, n], k) => {
       const i = k + first, lvl = n ? Math.ceil(n / max * 4) : 0;
-      c.fillStyle = ["#161616", "#4a4a4a", "#808080", "#b8b8b8", "#fff"][lvl];
-      c.fillRect((i / 7 | 0) * (C + GAP), (i % 7) * (C + GAP), C, C);
+      c.fillStyle = k === hl ? (n ? "#fff" : "#555") : ["#161616", "#4a4a4a", "#808080", "#b8b8b8", "#fff"][lvl];
+      c.fillRect((i / 7 | 0) * S, (i % 7) * S, C, C);
+      if (k === hl) { c.fillStyle = "#000"; c.fillRect((i / 7 | 0) * S + 2, (i % 7) * S + 2, 1, 1); }
     });
-    document.getElementById("heat-title").textContent = `contributions · ${d.total} in the last year`;
+    paint(-1);
+    const title = document.getElementById("heat-title"), base = `contributions · ${d.total} in the last year`;
+    title.textContent = base;
+    const day = iso => new Date(iso + "T00:00:00Z").toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" }).toLowerCase();
+    let last = -1;
+    cv.addEventListener("pointermove", e => {
+      const r = cv.getBoundingClientRect(), k = ((e.clientX - r.left) / S | 0) * 7 + ((e.clientY - r.top) / S | 0) - first;
+      if (k === last) return;
+      last = k; paint(k);
+      const hit = d.days[k];
+      title.textContent = hit ? `${day(hit[0])} · ${hit[1] || "no"} contribution${hit[1] === 1 ? "" : "s"}` : base;
+    });
+    cv.addEventListener("pointerleave", () => { last = -1; paint(-1); title.textContent = base; });
     document.getElementById("heat").hidden = false;
   });
 
   const q = encodeURIComponent(`author:${USER} type:pr is:merged -user:${USER}`);
   getJSON(`https://api.github.com/search/issues?q=${q}&sort=updated&order=desc&per_page=4`).then(d => {
     if (!d || !d.items || !d.items.length) return;
+    live.prTotal = d.total_count;
     live.prs = d.items.map(i => ({ title: i.title, url: i.html_url, repo: i.repository_url.split("/repos/")[1], at: (i.pull_request && i.pull_request.merged_at) || i.closed_at }));
     const ul = document.querySelector("#prs ul");
     for (const p of live.prs) ul.append(row(p.url, el("span", null, "✓ " + p.title), `${p.repo} · ${ago(p.at)}`));
@@ -273,18 +379,65 @@ const live = { repos: [], prs: [] };
 // ---- hidden shell: press ~ (or click "~ shell")
 {
   const term = document.getElementById("term"), out = document.getElementById("tout"), inp = document.getElementById("tin");
-  const print = s => { out.textContent += s + "\n"; out.scrollTop = out.scrollHeight; };
+  const print = s => { out.append(s + "\n"); out.scrollTop = out.scrollHeight; };
+  // github profile picture, 1-bit floyd-steinberg dithered, revealed a few rows per frame
+  let user;
+  const getUser = () => user = user || fetch("https://api.github.com/users/aeivrix").then(r => r.ok ? r.json() : null).catch(() => null);
+  function dither(cv, src) {
+    const N = cv.width, img = new Image(); img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const c = cv.getContext("2d"); c.drawImage(img, 0, 0, N, N);
+      const d = c.getImageData(0, 0, N, N), px = d.data, L = new Float32Array(N * N);
+      for (let i = 0; i < N * N; i++) L[i] = px[i * 4] * .3 + px[i * 4 + 1] * .59 + px[i * 4 + 2] * .11;
+      // auto-levels: stretch the 2nd..98th percentile to full range, gamma lifts the shadows
+      const q = Float32Array.from(L).sort(), lo = q[N * N * .02 | 0], hi = Math.max(lo + 1, q[N * N * .98 | 0]);
+      for (let i = 0; i < N * N; i++) L[i] = 255 * Math.pow(Math.min(1, Math.max(0, (L[i] - lo) / (hi - lo))), 0.65);
+      // atkinson: spreads only 6/8 of the error, so highlights stay clean and midtones keep detail
+      const add = (x, y, e) => { if (x >= 0 && x < N && y < N) L[y * N + x] += e; };
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const i = y * N + x, v = L[i] < 128 ? 0 : 255, e = (L[i] - v) / 8; L[i] = v;
+        add(x + 1, y, e); add(x + 2, y, e); add(x - 1, y + 1, e); add(x, y + 1, e); add(x + 1, y + 1, e); add(x, y + 2, e);
+      }
+      for (let i = 0; i < N * N; i++) { px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = L[i]; px[i * 4 + 3] = 255; }
+      c.clearRect(0, 0, N, N);
+      let y = 0;
+      const step = () => { c.putImageData(d, 0, 0, 0, y, N, 5); y += 5; if (y < N) requestAnimationFrame(step); };
+      still ? c.putImageData(d, 0, 0) : step();
+    };
+    img.src = src;
+  }
   const cmds = {
-    help: () => "whoami  ls  prs  cat stack  seed  open github  clear  exit",
+    help: () => "whoami  neofetch  ls  prs  cat stack  bloom  sweep  seed  date  echo  open github  clear  exit\n(tab completes, ↑ recalls)",
     whoami: () => "aeivrix. builds and ships in rust, python, typescript and c. contributes to open source.",
+    neofetch: () => {
+      const box = document.createElement("div"), cv = document.createElement("canvas"), txt = document.createElement("div");
+      box.className = "nf"; cv.width = cv.height = 200; cv.setAttribute("aria-hidden", "true");
+      box.append(cv, txt); out.append(box); out.scrollTop = out.scrollHeight;
+      const lines = u => ["aeivrix@web", "-----------",
+        ...(u ? [`joined    ${new Date(u.created_at).getFullYear()}`, `profile   ${u.public_repos} public repo${u.public_repos === 1 ? "" : "s"} · ${u.followers} follower${u.followers === 1 ? "" : "s"}`] : []),
+        "stack     rust · python · typescript · c",
+        "contribs  " + (live.contribs != null ? `${live.contribs} in the last year` : "loading"),
+        "merged    " + (live.prTotal ? `${live.prTotal} prs to other repos` : "none to show yet"),
+        "repos     " + (live.repos.map(r => r.name).join(", ") || "none public yet"),
+        "seed      " + hex(), "petals    " + garden.piled() + " on the ground"].join("\n");
+      txt.textContent = lines();
+      getUser().then(u => {
+        if (!u) { cv.remove(); return; }
+        txt.textContent = lines(u); dither(cv, u.avatar_url + "&s=400"); out.scrollTop = out.scrollHeight;
+      });
+    },
     ls: () => live.repos.length ? live.repos.map(r => `${r.name}  ${r.lang}`).join("\n") : "nothing public yet",
     prs: () => live.prs.length ? live.prs.map(p => `✓ ${p.title}  (${p.repo})`).join("\n") : "no merged prs to show yet",
     "cat stack": () => "rust · python · typescript · c",
-    seed: () => `${SEED_HEX}. refresh for a new tree`,
+    seed: () => `${hex()}. type bloom for a new tree`,
+    bloom: () => (garden.regrow(), `regrown from seed ${hex()}`),
+    sweep: () => { const n = garden.sweep(); return n ? `swept up ${n} petal${n === 1 ? "" : "s"}` : "nothing to sweep. click near a tree to shake it"; },
+    date: () => new Date().toString().toLowerCase(),
     "open github": () => (open("https://github.com/aeivrix", "_blank", "noopener"), "opening github.com/aeivrix"),
     clear: () => { out.textContent = ""; },
     exit: () => { toggle(false); },
   };
+  const hist = []; let hi = 0;
   function toggle(on) {
     term.hidden = !on;
     if (on) { if (!out.textContent) print("type help."); inp.focus(); } else inp.blur();
@@ -294,11 +447,25 @@ const live = { repos: [], prs: [] };
     else if (e.key === "Escape" && !term.hidden) toggle(false);
   });
   inp.addEventListener("keydown", e => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const v = inp.value.trimStart(), hits = Object.keys(cmds).filter(k => k.startsWith(v));
+      if (hits.length === 1) inp.value = hits[0];
+      else if (hits.length > 1 && v) print(hits.join("  "));
+      return;
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      hi = Math.max(0, Math.min(hist.length, hi + (e.key === "ArrowUp" ? -1 : 1)));
+      inp.value = hist[hi] || "";
+      return;
+    }
     if (e.key !== "Enter") return;
     const c = inp.value.trim().replace(/\s+/g, " "); inp.value = "";
     print("aeivrix@web:~$ " + c);
     if (!c) return;
-    const f = c.startsWith("sudo") ? () => "nice try." : cmds[c === "ls projects" ? "ls" : c];
+    hist.push(c); hi = hist.length;
+    const f = c.startsWith("sudo") ? () => "nice try." : c.startsWith("echo") ? () => c.slice(5) : cmds[c === "ls projects" ? "ls" : c];
     const res = f ? f() : `command not found: ${c}. try help`;
     if (res) print(res);
   });

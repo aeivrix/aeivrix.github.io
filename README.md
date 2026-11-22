@@ -1,6 +1,6 @@
 # aeivrix.github.io
 
-Personal page, live at https://aeivrix.github.io.
+Personal homepage, live at https://aeivrix.github.io.
 
 One static `index.html`, with no framework and no build step for the page itself.
 
